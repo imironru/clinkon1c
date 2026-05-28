@@ -251,8 +251,10 @@ public class MainWindow : Window
 
     private void UpdateActionBar()
     {
-        long selBytes = _selected.Sum(n => n.SizeBytes);
-        _actionBar.Update(_selected.Count, selBytes, _cacheModule.TotalSize);
+        // Считаем только листья (с Path), чтобы не суммировать родителей дважды
+        var leaves = _selected.Where(n => !string.IsNullOrEmpty(n.Path)).ToList();
+        long selBytes = leaves.Sum(n => n.SizeBytes);
+        _actionBar.Update(leaves.Count, selBytes, _cacheModule.TotalSize);
     }
 
     private void ShowHelp()

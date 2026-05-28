@@ -246,20 +246,24 @@ public class CacheModule : IModule
 
     public List<string> CollectPaths(IEnumerable<TreeNode> nodes)
     {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<string>();
         foreach (var n in nodes)
-        {
             if (n is CacheTreeNode cn)
-            {
-                if (cn.IsExcluded) continue;
-                if (!string.IsNullOrEmpty(cn.Path))
-                    result.Add(cn.Path!);
-                else
-                    foreach (var child in cn.Children.OfType<CacheTreeNode>())
-                        if (!child.IsExcluded && !string.IsNullOrEmpty(child.Path))
-                            result.Add(child.Path!);
-            }
-        }
+                CollectLeafPaths(cn, result, seen);
         return result;
+    }
+
+    private static void CollectLeafPaths(CacheTreeNode node, List<string> result, HashSet<string> seen)
+    {
+        if (node.IsExcluded) return;
+        if (!string.IsNullOrEmpty(node.Path))
+        {
+            if (seen.Add(node.Path!))
+                result.Add(node.Path!);
+            return;
+        }
+        foreach (var child in node.Children.OfType<CacheTreeNode>())
+            CollectLeafPaths(child, result, seen);
     }
 }
