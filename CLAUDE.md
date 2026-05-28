@@ -112,3 +112,34 @@ public const string VERSION = "1.0.0";
 Файл: `.github/workflows/build.yml`
 Триггер: тег `v*.*.*`
 Артефакт: `Clinkon1C.exe` в Releases
+
+## Два билда — поддержка Windows 7
+
+Проект собирается в два exe из одной кодовой базы:
+
+| Файл | Таргет | ОС |
+|---|---|---|
+| `Clinkon1C-x64.exe` | `net8.0-windows` | Win 10 / Server 2012 R2+ |
+| `Clinkon1C-legacy.exe` | `net48` | Win 7 SP1+ |
+
+### Проверка Framework при запуске legacy
+
+В `Program.cs` для legacy-билда — первое что делаем:
+
+```csharp
+#if NETFRAMEWORK
+CheckDotNetFramework();
+#endif
+```
+
+Проверка через реестр:
+```
+HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full → Release >= 528040
+```
+
+Если не найден — показываем сообщение и предлагаем открыть браузер:
+```
+https://dotnet.microsoft.com/en-us/download/dotnet-framework/net48
+```
+
+Автоустановка — запрещена.
