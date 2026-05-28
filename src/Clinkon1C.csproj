@@ -25,10 +25,17 @@
   <!-- .NET Framework 4.8: для Windows 7 -->
   <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
     <SelfContained>false</SelfContained>
+    <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Terminal.Gui" Version="1.*" />
+  </ItemGroup>
+
+  <!-- Пакеты только для net48 (в net8 встроены) -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="System.Text.Json" Version="8.*" />
+    <PackageReference Include="System.Net.Http.Json" Version="8.*" />
   </ItemGroup>
 
 </Project>

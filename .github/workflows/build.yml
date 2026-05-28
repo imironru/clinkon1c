@@ -1,0 +1,73 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore src/Clinkon1C.csproj
+
+      - name: Build net8 (x64, self-contained)
+        run: >
+          dotnet publish src/Clinkon1C.csproj
+          -f net8.0-windows
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -c Release
+          -o publish/x64
+
+      - name: Build net48 (legacy, Windows 7)
+        run: >
+          dotnet publish src/Clinkon1C.csproj
+          -f net48
+          -c Release
+          -o publish/legacy
+
+      - name: Rename artifacts
+        shell: pwsh
+        run: |
+          Rename-Item publish/x64/Clinkon1C.exe   Clinkon1C-x64.exe
+          Rename-Item publish/legacy/Clinkon1C.exe Clinkon1C-legacy.exe
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Clinkon1C v${{ steps.version.outputs.version }}"
+          body: |
+            ## Clinkon1C v${{ steps.version.outputs.version }}
+
+            **Файлы:**
+            - `Clinkon1C-x64.exe` — Windows 10 / Server 2012 R2+, .NET 8 self-contained (не требует установки .NET)
+            - `Clinkon1C-legacy.exe` — Windows 7 SP1+, требует .NET Framework 4.8
+
+            Запускать от имени администратора.
+          files: |
+            publish/x64/Clinkon1C-x64.exe
+            publish/legacy/Clinkon1C-legacy.exe
+          draft: false
+          prerelease: false
