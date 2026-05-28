@@ -40,32 +40,22 @@ public class CacheModule : IModule
             idx++;
             progress?.Invoke($"[{idx}/{profiles.Count}] Сканирование: {profile.UserName}...");
 
-            var base1C = Path.Combine(profile.LocalAppData, "1C");
-            if (!Directory.Exists(base1C)) continue;
-
             var ibases = ParseIBases(profile.AppData);
 
-            foreach (var v8dir in Directory.GetDirectories(base1C, "1cv8*", SearchOption.TopDirectoryOnly))
+            // %LOCALAPPDATA%\1C\1cv8*\ — основной кэш баз
+            var localBase1C = Path.Combine(profile.LocalAppData, "1C");
+            if (Directory.Exists(localBase1C))
             {
-                foreach (var uuidDir in Directory.GetDirectories(v8dir))
-                {
-                    var uuid = Path.GetFileName(uuidDir);
-                    progress?.Invoke($"[{idx}/{profiles.Count}] {profile.UserName}: измерение {uuid.Substring(0, Math.Min(8, uuid.Length))}...");
-                    bool isDead = !ibases.TryGetValue(uuid, out var baseName);
-                    if (baseName == null)
-                        baseName = $"[мёртвая папка: {uuid.Substring(0, Math.Min(8, uuid.Length))}]";
+                foreach (var v8dir in Directory.GetDirectories(localBase1C, "1cv8*", SearchOption.TopDirectoryOnly))
+                    ScanUuidDirs(v8dir, profile.UserName, ibases, idx, profiles.Count, progress);
+            }
 
-                    var (size, _, _) = SafeDelete.Measure(uuidDir);
-                    _entries.Add(new CacheEntry
-                    {
-                        UserName = profile.UserName,
-                        BaseName = baseName,
-                        CachePath = uuidDir,
-                        SizeBytes = size,
-                        IsDead = isDead
-                    });
-                    TotalSize += size;
-                }
+            // %APPDATA%\1C\1cv8*\ — пользовательские настройки платформы по базам (Roaming)
+            var roamingBase1C = Path.Combine(profile.AppData, "1C");
+            if (Directory.Exists(roamingBase1C))
+            {
+                foreach (var v8dir in Directory.GetDirectories(roamingBase1C, "1cv8*", SearchOption.TopDirectoryOnly))
+                    ScanUuidDirs(v8dir, profile.UserName, ibases, idx, profiles.Count, progress);
             }
 
             // %TEMP%\1C\
@@ -89,6 +79,38 @@ public class CacheModule : IModule
         progress?.Invoke("Построение дерева...");
 
         Logger.Info($"CacheModule: {_entries.Count} записей, {SafeDelete.FormatSize(TotalSize)}");
+    }
+
+    private void ScanUuidDirs(string v8dir, string userName, Dictionary<string, string> ibases,
+        int idx, int total, Action<string>? progress)
+    {
+        foreach (var uuidDir in Directory.GetDirectories(v8dir))
+        {
+            var uuid = Path.GetFileName(uuidDir);
+            // Пропускаем не-UUID папки (например, 1CEStart)
+            if (uuid.Length != 36 || uuid[8] != '-') continue;
+
+            progress?.Invoke($"[{idx}/{total}] {userName}: {uuid.Substring(0, 8)}...");
+            bool isDead = !ibases.TryGetValue(uuid, out var baseName);
+            if (baseName == null)
+                baseName = $"[мёртвая папка: {uuid.Substring(0, 8)}]";
+
+            var (size, _, _) = SafeDelete.Measure(uuidDir);
+            // Не добавляем дубликаты (один UUID может встречаться в Local и Roaming)
+            var existing = _entries.FirstOrDefault(e =>
+                e.UserName == userName && e.CachePath == uuidDir);
+            if (existing != null) continue;
+
+            _entries.Add(new CacheEntry
+            {
+                UserName = userName,
+                BaseName = baseName,
+                CachePath = uuidDir,
+                SizeBytes = size,
+                IsDead = isDead
+            });
+            TotalSize += size;
+        }
     }
 
     private Dictionary<string, string> ParseIBases(string appData)
