@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <PackageReference Include="Terminal.Gui" Version="1.*" />
+    <PackageReference Include="System.Diagnostics.EventLog" Version="8.*" />
   </ItemGroup>
 
   <!-- Пакеты только для net48 (в net8 встроены) -->
