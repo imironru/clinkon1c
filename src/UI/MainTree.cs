@@ -316,7 +316,8 @@ public class MainWindow : Window
 
         Logger.Info("RunDelete: подтверждено, запускаем удаление");
         var result = SafeDelete.Delete(paths, RegistryHelper.BackupEnabled,
-            RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null);
+            RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null,
+            SafeDelete.CacheProtectedMasks);
         Logger.Info($"RunDelete: итог — папок: {result.DeletedDirs}, файлов: {result.DeletedFiles}, " +
                     $"освобождено: {SafeDelete.FormatSize(result.FreedBytes)}, " +
                     $"пропущено: {result.Skipped.Count}, ошибок: {result.Errors.Count}");

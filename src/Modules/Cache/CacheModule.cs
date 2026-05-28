@@ -225,7 +225,8 @@ public class CacheModule : IModule
         Logger.Info($"CacheModule.Delete: {paths.Count} путей");
         if (paths.Count == 0) return;
         var result = SafeDelete.Delete(paths, RegistryHelper.BackupEnabled,
-            RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null);
+            RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null,
+            SafeDelete.CacheProtectedMasks);
         Logger.Info($"Удалено: {result.DeletedDirs} папок, {result.DeletedFiles} файлов, " +
                     $"{SafeDelete.FormatSize(result.FreedBytes)}, ошибок: {result.Errors.Count}");
     }

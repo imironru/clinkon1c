@@ -98,10 +98,54 @@ class Program
 
         Logger.Info($"Clinkon1C v{VERSION} запущен пользователем {Environment.UserName}");
 
-        // Проверка прав администратора
+        // Проверка прав администратора — предлагаем UAC elevation
         bool isAdmin = IsAdministrator();
         if (!isAdmin)
-            Logger.Warn("Запущен без прав администратора — часть профилей может быть недоступна");
+        {
+            Logger.Warn("Запущен без прав администратора");
+            Console.WriteLine();
+            Console.WriteLine("  Утилита запущена без прав администратора.");
+            Console.WriteLine("  Без повышения прав часть профилей может быть недоступна.");
+            Console.WriteLine();
+            Console.WriteLine("  [1] Перезапустить с правами администратора (рекомендуется)");
+            Console.WriteLine("  [2] Продолжить без повышения прав");
+            Console.WriteLine("  [3] Выход");
+            Console.Write("> ");
+            while (true)
+            {
+                var k = Console.ReadKey(intercept: true);
+                if (k.Key == ConsoleKey.D1 || k.KeyChar == '1')
+                {
+                    Console.WriteLine("1");
+                    try
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName,
+                            Verb = "runas",
+                            UseShellExecute = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Не удалось запустить с повышением прав: {ex.Message}");
+                        Console.ReadKey(intercept: true);
+                    }
+                    return;
+                }
+                if (k.Key == ConsoleKey.D2 || k.KeyChar == '2')
+                {
+                    Console.WriteLine("2");
+                    Logger.Warn("Пользователь выбрал продолжить без прав администратора");
+                    break;
+                }
+                if (k.Key == ConsoleKey.D3 || k.KeyChar == '3' || k.Key == ConsoleKey.Escape)
+                {
+                    Console.WriteLine("3");
+                    return;
+                }
+            }
+        }
 
         // Проверка обновлений (фоновая)
         string? updateNotice = null;

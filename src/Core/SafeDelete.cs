@@ -4,16 +4,22 @@ public record DeleteResult(int DeletedDirs, int DeletedFiles, long FreedBytes, L
 
 public static class SafeDelete
 {
-    private static readonly string[] ProtectedMasks = { "*.lic", "*.pfl", "*.usr", "1CV8Clnt.flt", "*.1CD", "*.dbf" };
+    // Полный набор — для модулей Логи, Шаблоны (Phase 2)
+    public static readonly string[] DefaultProtectedMasks =
+        { "*.lic", "*.pfl", "*.usr", "1CV8Clnt.flt", "*.1CD", "*.dbf" };
 
-    public static bool IsProtected(string path)
+    // Облегчённый набор — для кэша: *.1CD и *.pfl внутри папок кэша это служебные файлы платформы, не базы
+    public static readonly string[] CacheProtectedMasks =
+        { "*.lic", "*.usr", "1CV8Clnt.flt" };
+
+    public static bool IsProtected(string path, string[]? masks = null)
     {
         var name = Path.GetFileName(path);
-        foreach (var mask in ProtectedMasks)
+        foreach (var mask in masks ?? DefaultProtectedMasks)
         {
             if (mask.StartsWith("*"))
             {
-                var ext = mask.Substring(1); // *.lic → .lic
+                var ext = mask.Substring(1);
                 if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return true;
             }
             else
@@ -24,12 +30,14 @@ public static class SafeDelete
         return false;
     }
 
-    public static DeleteResult Delete(IEnumerable<string> paths, bool backup = false, string? backupRoot = null)
+    public static DeleteResult Delete(IEnumerable<string> paths, bool backup = false,
+        string? backupRoot = null, string[]? protectedMasks = null)
     {
         var skipped = new List<string>();
         var errors = new List<string>();
         int dirs = 0, files = 0;
         long freed = 0;
+        var masks = protectedMasks ?? DefaultProtectedMasks;
 
         var backupDir = backup && backupRoot != null
             ? Path.Combine(backupRoot, DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"))
@@ -39,14 +47,14 @@ public static class SafeDelete
         {
             if (Directory.Exists(path))
             {
-                var r = DeleteDirectory(path, skipped, errors, backupDir);
+                var r = DeleteDirectory(path, skipped, errors, backupDir, masks);
                 dirs += r.dirs;
                 files += r.files;
                 freed += r.freed;
             }
             else if (File.Exists(path))
             {
-                var r = DeleteFile(path, skipped, errors, backupDir);
+                var r = DeleteFile(path, skipped, errors, backupDir, masks);
                 files += r.files;
                 freed += r.freed;
             }
@@ -57,7 +65,7 @@ public static class SafeDelete
     }
 
     private static (int dirs, int files, long freed) DeleteDirectory(
-        string dir, List<string> skipped, List<string> errors, string? backupDir)
+        string dir, List<string> skipped, List<string> errors, string? backupDir, string[] masks)
     {
         int dirs = 0, files = 0;
         long freed = 0;
@@ -74,12 +82,12 @@ public static class SafeDelete
 
         foreach (var f in info.GetFiles("*", SearchOption.AllDirectories))
         {
-            var r = DeleteFile(f.FullName, skipped, errors, backupDir);
+            var r = DeleteFile(f.FullName, skipped, errors, backupDir, masks);
             files += r.files;
             freed += r.freed;
         }
 
-        // Удаляем пустые папки снизу вверх
+        // Удаляем папки снизу вверх (только пустые после удаления файлов)
         foreach (var sub in info.GetDirectories("*", SearchOption.AllDirectories)
                                .OrderByDescending(d => d.FullName.Length))
         {
@@ -94,9 +102,9 @@ public static class SafeDelete
     }
 
     private static (int files, long freed) DeleteFile(
-        string path, List<string> skipped, List<string> errors, string? backupDir)
+        string path, List<string> skipped, List<string> errors, string? backupDir, string[] masks)
     {
-        if (IsProtected(path))
+        if (IsProtected(path, masks))
         {
             skipped.Add(path);
             Logger.Warn($"Защищённый файл пропущен: {path}");
