@@ -56,7 +56,7 @@ public static class RegistryHelper
             using var key = Registry.CurrentUser.OpenSubKey(keyPath);
             var raw = key?.GetValue(name) as string ?? "";
             return new HashSet<string>(
-                raw.Split(';', StringSplitOptions.RemoveEmptyEntries),
+                raw.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries),
                 StringComparer.OrdinalIgnoreCase);
         }
         catch { return new HashSet<string>(); }

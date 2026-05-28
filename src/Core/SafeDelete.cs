@@ -13,7 +13,7 @@ public static class SafeDelete
         {
             if (mask.StartsWith("*"))
             {
-                var ext = mask[1..]; // *.lic → .lic
+                var ext = mask.Substring(1); // *.lic → .lic
                 if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return true;
             }
             else

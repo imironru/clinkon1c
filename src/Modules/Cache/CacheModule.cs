@@ -46,7 +46,7 @@ public class CacheModule : IModule
                     var uuid = Path.GetFileName(uuidDir);
                     bool isDead = !ibases.TryGetValue(uuid, out var baseName);
                     if (baseName == null)
-                        baseName = $"[мёртвая папка: {uuid[..Math.Min(8, uuid.Length)]}]";
+                        baseName = $"[мёртвая папка: {uuid.Substring(0, Math.Min(8, uuid.Length))}]";
 
                     var (size, _, _) = SafeDelete.Measure(uuidDir);
                     _entries.Add(new CacheEntry
@@ -95,10 +95,10 @@ public class CacheModule : IModule
             {
                 var t = line.Trim();
                 if (t.StartsWith("[") && t.EndsWith("]"))
-                { currentName = t[1..^1]; continue; }
+                { currentName = t.Substring(1, t.Length - 2); continue; }
                 if (currentName != null && t.StartsWith("LocalCache=", StringComparison.OrdinalIgnoreCase))
                 {
-                    var uuid = t["LocalCache=".Length..].Trim().Trim('/');
+                    var uuid = t.Substring("LocalCache=".Length).Trim().Trim('/');
                     if (!string.IsNullOrEmpty(uuid))
                         result[uuid] = currentName;
                 }
@@ -118,12 +118,12 @@ public class CacheModule : IModule
                 if (t.StartsWith("[") && inCommon) inCommon = false;
                 if (!inCommon) continue;
                 if (t.StartsWith("[") && t.EndsWith("]"))
-                { currentName = t[1..^1]; continue; }
+                { currentName = t.Substring(1, t.Length - 2); continue; }
                 if (currentName != null && t.StartsWith("LocalCache=", StringComparison.OrdinalIgnoreCase))
                 {
-                    var uuid = t["LocalCache=".Length..].Trim().Trim('/');
-                    if (!string.IsNullOrEmpty(uuid))
-                        result.TryAdd(uuid, currentName);
+                    var uuid = t.Substring("LocalCache=".Length).Trim().Trim('/');
+                    if (!string.IsNullOrEmpty(uuid) && !result.ContainsKey(uuid))
+                        result[uuid] = currentName;
                 }
             }
         }
