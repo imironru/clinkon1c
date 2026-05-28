@@ -176,8 +176,7 @@ public class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            case Key.d:
-            case Key.D:
+            case Key.DeleteChar | Key.ShiftMask:
                 RunDryRun();
                 e.Handled = true;
                 break;
@@ -192,8 +191,7 @@ public class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            case Key.r:
-            case Key.R:
+            case Key.F5:
                 RefreshTree();
                 e.Handled = true;
                 break;
@@ -210,8 +208,7 @@ public class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            case Key.q:
-            case Key.Q:
+            case Key.F10:
                 Application.RequestStop();
                 e.Handled = true;
                 break;
@@ -346,17 +343,17 @@ public class MainWindow : Window
     private void ShowHelp()
     {
         Dialogs.ShowInfo("Помощь — Clinkon1C", @"
-  ↑ ↓          Навигация по дереву
-  → / Enter    Раскрыть узел
-  ←            Свернуть / подняться
-  Пробел       Выделить узел (и всё дерево под ним)
-  Tab          Переключить вид (по пользователю / по базе)
-  D            Dry Run для выделенного
-  Del          Удалить выделенное
-  R            Обновить дерево
-  Esc          Снять выделение
-  F1           Помощь
-  Q            Выход
+  ↑ ↓            Навигация по дереву
+  → / Enter      Раскрыть узел
+  ←              Свернуть / подняться
+  Пробел         Выделить узел (и всё дерево под ним)
+  Esc            Снять выделение
+  Tab            Переключить вид (по пользователю / по базе)
+  Shift+Del      Dry Run для выделенного
+  Del            Удалить выделенное
+  F5             Обновить дерево
+  F1             Помощь
+  F10            Выход
 ");
     }
 }

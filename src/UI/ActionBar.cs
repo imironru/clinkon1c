@@ -14,7 +14,7 @@ public class ActionBar : View
         Width = Dim.Fill();
         Y = Pos.AnchorEnd(2);
 
-        _keysLabel = new Label("[Пробел] Выделить  [D] Dry Run  [Del] Удалить  [Tab] Сменить вид  [R] Обновить  [F1] Помощь  [Q] Выход")
+        _keysLabel = new Label("[Пробел] Выделить  [Shift+Del] Dry Run  [Del] Удалить  [Tab] Сменить вид  [F5] Обновить  [F1] Помощь  [F10] Выход")
         {
             X = 0, Y = 0,
             ColorScheme = new ColorScheme
