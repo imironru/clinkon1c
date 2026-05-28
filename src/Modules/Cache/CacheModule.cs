@@ -253,11 +253,11 @@ public class CacheModule : IModule
             {
                 if (cn.IsExcluded) continue;
                 if (!string.IsNullOrEmpty(cn.Path))
-                    result.Add(cn.Path);
+                    result.Add(cn.Path!);
                 else
                     foreach (var child in cn.Children.OfType<CacheTreeNode>())
                         if (!child.IsExcluded && !string.IsNullOrEmpty(child.Path))
-                            result.Add(child.Path);
+                            result.Add(child.Path!);
             }
         }
         return result;
