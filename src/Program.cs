@@ -82,9 +82,18 @@ class Program
         while (true)
         {
             var key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Y) { Console.WriteLine(); break; }
+            if (key.Key == ConsoleKey.Y)
+            {
+                Console.WriteLine("Y");
+                Console.WriteLine("Запуск...");
+                break;
+            }
             if (key.Key == ConsoleKey.N || key.Key == ConsoleKey.Escape)
-            { Console.WriteLine(); return; }
+            {
+                Console.WriteLine("N");
+                Console.WriteLine("Отменено.");
+                return;
+            }
         }
 
         Logger.Info($"Clinkon1C v{VERSION} запущен пользователем {Environment.UserName}");

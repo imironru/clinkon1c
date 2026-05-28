@@ -25,15 +25,21 @@ public class CacheModule : IModule
 
     public string GetSize() => SafeDelete.FormatSize(TotalSize);
 
-    public void Refresh()
+    public void Refresh(Action<string>? progress = null)
     {
         _entries.Clear();
         TotalSize = 0;
 
+        progress?.Invoke("Поиск профилей пользователей...");
         var profiles = ProfileFinder.FindProfiles();
+        Logger.Info($"Найдено профилей: {profiles.Count}");
 
+        int idx = 0;
         foreach (var profile in profiles)
         {
+            idx++;
+            progress?.Invoke($"[{idx}/{profiles.Count}] Сканирование: {profile.UserName}...");
+
             var base1C = Path.Combine(profile.LocalAppData, "1C");
             if (!Directory.Exists(base1C)) continue;
 
@@ -44,6 +50,7 @@ public class CacheModule : IModule
                 foreach (var uuidDir in Directory.GetDirectories(v8dir))
                 {
                     var uuid = Path.GetFileName(uuidDir);
+                    progress?.Invoke($"[{idx}/{profiles.Count}] {profile.UserName}: измерение {uuid.Substring(0, Math.Min(8, uuid.Length))}...");
                     bool isDead = !ibases.TryGetValue(uuid, out var baseName);
                     if (baseName == null)
                         baseName = $"[мёртвая папка: {uuid.Substring(0, Math.Min(8, uuid.Length))}]";
@@ -79,6 +86,7 @@ public class CacheModule : IModule
                 }
             }
         }
+        progress?.Invoke("Построение дерева...");
 
         Logger.Info($"CacheModule: {_entries.Count} записей, {SafeDelete.FormatSize(TotalSize)}");
     }
@@ -133,7 +141,7 @@ public class CacheModule : IModule
 
     public IEnumerable<TreeNode> GetTree()
     {
-        Refresh();
+        // Refresh() вызывается отдельно (с прогрессом) через MainWindow.RefreshTree
         var exUsers = RegistryHelper.GetExcludedUsers();
         var exBases = RegistryHelper.GetExcludedBases();
 

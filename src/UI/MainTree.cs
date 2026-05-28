@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Cache;
 using Terminal.Gui;
@@ -58,7 +60,61 @@ public class MainWindow : Window
     {
         _selected.Clear();
         _tree.ClearObjects();
+        UpdateActionBar();
 
+        // Диалог прогресса
+        var dlg = new Dialog("Clinkon1C", 60, 7);
+        var statusLabel = new Label("Инициализация...")
+        {
+            X = 1, Y = 1, Width = Dim.Fill(1)
+        };
+        var spinner = new Label("") { X = 1, Y = 3, Width = Dim.Fill(1) };
+        dlg.Add(statusLabel, spinner);
+
+        // Анимация спиннера
+        int spinIdx = 0;
+        var spinChars = new[] { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
+        var spinTimer = new System.Threading.Timer(_ =>
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                spinner.Text = spinChars[spinIdx % spinChars.Length];
+                spinIdx++;
+                spinner.SetNeedsDisplay();
+            });
+        }, null, 0, 100);
+
+        // Сканирование в фоновом потоке
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                _cacheModule.Refresh(msg =>
+                {
+                    Application.MainLoop?.Invoke(() =>
+                    {
+                        statusLabel.Text = msg.Length > 56 ? msg.Substring(0, 53) + "..." : msg;
+                        statusLabel.SetNeedsDisplay();
+                    });
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Ошибка сканирования: {ex.Message}");
+            }
+            finally
+            {
+                spinTimer.Dispose();
+                Application.MainLoop?.Invoke(() =>
+                {
+                    Application.RequestStop(dlg);
+                });
+            }
+        });
+
+        Application.Run(dlg);
+
+        // Строим дерево на основе уже заполненных данных
         var nodes = _cacheModule.GetTree().ToList();
         foreach (var n in nodes)
             _tree.AddObject(n);
@@ -67,6 +123,7 @@ public class MainWindow : Window
             _tree.SelectedObject = nodes[0];
 
         UpdateActionBar();
+        _tree.SetNeedsDisplay();
     }
 
     private void SetupColorRenderer()
