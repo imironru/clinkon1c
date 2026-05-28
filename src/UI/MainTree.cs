@@ -200,36 +200,49 @@ public class MainWindow : Window
             ? (IEnumerable<TreeNode>)_selected.ToList()
             : GetCurrentNodeAsEnumerable();
 
-        var list = targets.ToList();
-        if (list.Count == 0) return;
+        // Собираем реальные пути (только листья) ДО диалога — для точного подсчёта
+        var paths = _cacheModule.CollectPaths(targets);
+        Logger.Info($"RunDelete: собрано путей для удаления: {paths.Count}");
+        foreach (var p in paths)
+            Logger.Info($"  -> {p}");
 
-        long totalBytes = list.OfType<CacheTreeNode>().Sum(n => n.SizeBytes);
+        if (paths.Count == 0)
+        {
+            Logger.Warn("RunDelete: путей не найдено, удаление отменено");
+            return;
+        }
 
-        // Определяем уровень подтверждения
+        // Считаем реальный объём по путям (не по SizeBytes узлов)
+        long totalBytes = 0;
+        foreach (var p in paths)
+        {
+            var (sz, _, _) = SafeDelete.Measure(p);
+            totalBytes += sz;
+        }
+
         bool confirmed;
-        if (totalBytes > 10L * 1024 * 1024 * 1024) // > 10 GB — критическое
+        if (totalBytes > 10L * 1024 * 1024 * 1024)
         {
             confirmed = Dialogs.ConfirmWord(
                 "ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ",
                 $"Будет удалено: {SafeDelete.FormatSize(totalBytes)}\nЭто большой объём данных!",
                 "УДАЛИТЬ");
         }
-        else if (list.Count > 5 || totalBytes > 1L * 1024 * 1024 * 1024) // > 1 GB — опасное
+        else if (paths.Count > 5 || totalBytes > 1L * 1024 * 1024 * 1024)
         {
             confirmed = Dialogs.Confirm(
                 "Подтверждение удаления",
-                $"Удалить {list.Count} объект(а/ов)?\nОбъём: {SafeDelete.FormatSize(totalBytes)}");
+                $"Удалить {paths.Count} объект(а/ов)?\nОбъём: {SafeDelete.FormatSize(totalBytes)}");
         }
         else
         {
             confirmed = Dialogs.Confirm(
                 "Подтверждение",
-                $"Удалить выделенное? ({SafeDelete.FormatSize(totalBytes)})");
+                $"Удалить {paths.Count} объект(а/ов)? ({SafeDelete.FormatSize(totalBytes)})");
         }
 
         if (!confirmed) return;
 
-        // Проверяем запущенные процессы 1С
         if (ProcessHelper.AnyRunning1CProcesses())
         {
             if (!Dialogs.Confirm("Предупреждение",
@@ -237,7 +250,15 @@ public class MainWindow : Window
                 return;
         }
 
-        _cacheModule.Delete(list);
+        Logger.Info("RunDelete: подтверждено, запускаем удаление");
+        var result = SafeDelete.Delete(paths, RegistryHelper.BackupEnabled,
+            RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null);
+        Logger.Info($"RunDelete: итог — папок: {result.DeletedDirs}, файлов: {result.DeletedFiles}, " +
+                    $"освобождено: {SafeDelete.FormatSize(result.FreedBytes)}, " +
+                    $"пропущено: {result.Skipped.Count}, ошибок: {result.Errors.Count}");
+        foreach (var e in result.Errors)
+            Logger.Error($"  ошибка: {e}");
+
         _selected.Clear();
         RefreshTree();
     }

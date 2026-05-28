@@ -212,12 +212,14 @@ public class CacheModule : IModule
 
     public void Delete(IEnumerable<TreeNode> selected)
     {
+        // Вызывается из IModule; реальное удаление с логами идёт через MainTree.RunDelete
         var paths = CollectPaths(selected);
+        Logger.Info($"CacheModule.Delete: {paths.Count} путей");
         if (paths.Count == 0) return;
         var result = SafeDelete.Delete(paths, RegistryHelper.BackupEnabled,
             RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null);
         Logger.Info($"Удалено: {result.DeletedDirs} папок, {result.DeletedFiles} файлов, " +
-                    $"{SafeDelete.FormatSize(result.FreedBytes)}");
+                    $"{SafeDelete.FormatSize(result.FreedBytes)}, ошибок: {result.Errors.Count}");
     }
 
     public void DryRun(IEnumerable<TreeNode> selected)

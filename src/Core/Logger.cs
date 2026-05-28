@@ -4,7 +4,9 @@ namespace Clinkon1C.Core;
 
 public static class Logger
 {
-    private static readonly string LogDir = @"C:\ProgramData\Clinkon1C\logs";
+    private static readonly string LogDir = Path.Combine(
+        Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? ".") ?? ".",
+        "logs");
     private static readonly object _lock = new();
 
     private static string LogFile =>
