@@ -52,8 +52,15 @@ public class MainWindow : Window
         _tree.KeyPress += OnTreeKeyPress;
         _tree.SelectionChanged += OnSelectionChanged;
 
-        RefreshTree();
         SetupColorRenderer();
+
+        // Откладываем RefreshTree до первой итерации event loop —
+        // Application.Run(dlg) нельзя вызывать из конструктора до старта основного цикла
+        Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(50), _ =>
+        {
+            RefreshTree();
+            return false; // однократно
+        });
     }
 
     private void RefreshTree()
