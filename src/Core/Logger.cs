@@ -12,6 +12,9 @@ public static class Logger
     private static string LogFile =>
         Path.Combine(LogDir, $"clinkon_{DateTime.Now:yyyy-MM-dd}.log");
 
+    // Событие для UI-панели сообщений: (level, message)
+    public static event Action<string, string>? MessageLogged;
+
     public static void Info(string message) => Write("INFO", message);
     public static void Warn(string message) => Write("WARN", message);
     public static void Error(string message) => Write("ERROR", message);
@@ -30,6 +33,9 @@ public static class Logger
 
             Rotate();
         }
+        catch { }
+
+        try { MessageLogged?.Invoke(level, message); }
         catch { }
     }
 

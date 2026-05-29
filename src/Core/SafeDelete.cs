@@ -8,9 +8,11 @@ public static class SafeDelete
     public static readonly string[] DefaultProtectedMasks =
         { "*.lic", "*.pfl", "*.usr", "1CV8Clnt.flt", "*.1CD", "*.dbf" };
 
-    // Облегчённый набор — для кэша: *.1CD и *.pfl внутри папок кэша это служебные файлы платформы, не базы
+    // Облегчённый набор — для кэша: внутри UUID-папок кэша *.1CD, *.pfl, *.usr, *.dbf
+    // являются служебными файлами платформы (не базы/профили), безопасны для удаления.
+    // Защищаем только *.lic (лицензии могут быть где угодно).
     public static readonly string[] CacheProtectedMasks =
-        { "*.lic", "*.usr", "1CV8Clnt.flt" };
+        { "*.lic" };
 
     public static bool IsProtected(string path, string[]? masks = null)
     {

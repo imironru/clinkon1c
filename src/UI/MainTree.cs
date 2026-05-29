@@ -11,55 +11,75 @@ public class MainWindow : Window
 {
     private readonly TreeView _tree;
     private readonly ActionBar _actionBar;
+    private readonly MessagePanel _msgPanel;
     private readonly CacheModule _cacheModule;
     private readonly HashSet<CacheTreeNode> _selected = new();
-    private string? _updateNotice;
 
-    public MainWindow(CacheModule cacheModule, string? updateNotice = null) : base("Clinkon1C")
+    private const string RepoUrl = "github.com/iMironRU/Clinkon1C";
+
+    // Высоты фиксированных зон (строк)
+    private const int HeaderLines = 1;
+    private const int MsgLines    = 2;
+    private const int BarLines    = 2;
+    private const int FixedLines  = HeaderLines + MsgLines + BarLines;
+
+    public MainWindow(CacheModule cacheModule, string? updateNotice = null) : base("")
     {
         _cacheModule = cacheModule;
-        _updateNotice = updateNotice;
         X = 0; Y = 0;
         Width = Dim.Fill();
         Height = Dim.Fill();
 
-        // Заголовок с уведомлением об обновлении
+        // ── Верхняя строка: название + репозиторий ──────────────────────────
+        var header = new Label($" Clinkon1C v{Program.VERSION}  │  {RepoUrl}")
+        {
+            X = 0, Y = 0, Width = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.Cyan, Color.Black)
+            }
+        };
+
+        // Уведомление об обновлении (если есть) — справа в той же строке
         if (!string.IsNullOrEmpty(updateNotice))
         {
-            var notice = new Label($"  ★ Доступно обновление: {updateNotice}")
+            var notice = new Label($"  ★ Доступно обновление: {updateNotice}  ")
             {
-                X = 0, Y = 0,
+                X = Pos.AnchorEnd(updateNotice!.Length + 28), Y = 0,
                 ColorScheme = new ColorScheme
                 {
-                    Normal = Terminal.Gui.Attribute.Make(Color.Green, Color.Black)
+                    Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
                 }
             };
             Add(notice);
         }
 
+        // ── Дерево ──────────────────────────────────────────────────────────
         _tree = new TreeView
         {
             X = 0,
-            Y = string.IsNullOrEmpty(updateNotice) ? 0 : 1,
+            Y = HeaderLines,
             Width = Dim.Fill(),
-            Height = Dim.Fill(2)
+            Height = Dim.Fill(FixedLines - HeaderLines) // Fill минус msg+bar
         };
 
+        // ── Панель сообщений (над статусной строкой) ─────────────────────────
+        _msgPanel = new MessagePanel();
+
+        // ── Статусная строка ─────────────────────────────────────────────────
         _actionBar = new ActionBar();
 
-        Add(_tree, _actionBar);
+        Add(header, _tree, _msgPanel, _actionBar);
 
         _tree.KeyPress += OnTreeKeyPress;
         _tree.SelectionChanged += OnSelectionChanged;
 
         SetupColorRenderer();
 
-        // Откладываем RefreshTree до первой итерации event loop —
-        // Application.Run(dlg) нельзя вызывать из конструктора до старта основного цикла
         Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(50), _ =>
         {
             RefreshTree();
-            return false; // однократно
+            return false;
         });
     }
 
@@ -69,30 +89,27 @@ public class MainWindow : Window
         _tree.ClearObjects();
         UpdateActionBar();
 
-        // Диалог прогресса
-        var dlg = new Dialog("Clinkon1C", 60, 7);
+        var dlg = new Dialog("Clinkon1C", 62, 7);
         var statusLabel = new Label("Инициализация...")
         {
             X = 1, Y = 1, Width = Dim.Fill(1)
         };
-        var spinner = new Label("") { X = 1, Y = 3, Width = Dim.Fill(1) };
+        var spinner = new Label("") { X = 1, Y = 3, Width = 4 };
         dlg.Add(statusLabel, spinner);
 
-        // Анимация спиннера
         int spinIdx = 0;
-        var spinChars = new[] { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
-        var spinTimer = new System.Threading.Timer(_ =>
+        var spinFrames = new[] { "|", "/", "-", "\\" };
+        var spinTimer = new Timer(_ =>
         {
             Application.MainLoop?.Invoke(() =>
             {
-                spinner.Text = spinChars[spinIdx % spinChars.Length];
+                spinner.Text = spinFrames[spinIdx % spinFrames.Length];
                 spinIdx++;
                 spinner.SetNeedsDisplay();
             });
-        }, null, 0, 100);
+        }, null, 0, 120);
 
-        // Сканирование в фоновом потоке
-        System.Threading.Tasks.Task.Run(() =>
+        Task.Run(() =>
         {
             try
             {
@@ -100,7 +117,7 @@ public class MainWindow : Window
                 {
                     Application.MainLoop?.Invoke(() =>
                     {
-                        statusLabel.Text = msg.Length > 56 ? msg.Substring(0, 53) + "..." : msg;
+                        statusLabel.Text = msg.Length > 58 ? msg.Substring(0, 55) + "..." : msg;
                         statusLabel.SetNeedsDisplay();
                     });
                 });
@@ -112,16 +129,12 @@ public class MainWindow : Window
             finally
             {
                 spinTimer.Dispose();
-                Application.MainLoop?.Invoke(() =>
-                {
-                    Application.RequestStop(dlg);
-                });
+                Application.MainLoop?.Invoke(() => Application.RequestStop(dlg));
             }
         });
 
         Application.Run(dlg);
 
-        // Строим дерево на основе уже заполненных данных
         var nodes = _cacheModule.GetTree().ToList();
         foreach (var n in nodes)
             _tree.AddObject(n);
@@ -261,7 +274,6 @@ public class MainWindow : Window
             ? (IEnumerable<TreeNode>)_selected.ToList()
             : GetCurrentNodeAsEnumerable();
 
-        // Собираем реальные пути (только листья) ДО диалога — для точного подсчёта
         var paths = _cacheModule.CollectPaths(targets);
         Logger.Info($"RunDelete: собрано путей для удаления: {paths.Count}");
         foreach (var p in paths)
@@ -269,11 +281,10 @@ public class MainWindow : Window
 
         if (paths.Count == 0)
         {
-            Logger.Warn("RunDelete: путей не найдено, удаление отменено");
+            Logger.Warn("RunDelete: нет путей для удаления");
             return;
         }
 
-        // Считаем реальный объём по путям (не по SizeBytes узлов)
         long totalBytes = 0;
         foreach (var p in paths)
         {
@@ -315,11 +326,12 @@ public class MainWindow : Window
         var result = SafeDelete.Delete(paths, RegistryHelper.BackupEnabled,
             RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null,
             SafeDelete.CacheProtectedMasks);
-        Logger.Info($"RunDelete: итог — папок: {result.DeletedDirs}, файлов: {result.DeletedFiles}, " +
+
+        Logger.Info($"Итог: папок: {result.DeletedDirs}, файлов: {result.DeletedFiles}, " +
                     $"освобождено: {SafeDelete.FormatSize(result.FreedBytes)}, " +
                     $"пропущено: {result.Skipped.Count}, ошибок: {result.Errors.Count}");
-        foreach (var e in result.Errors)
-            Logger.Error($"  ошибка: {e}");
+        foreach (var err in result.Errors)
+            Logger.Error($"Ошибка: {err}");
 
         _selected.Clear();
         RefreshTree();
@@ -334,7 +346,6 @@ public class MainWindow : Window
 
     private void UpdateActionBar()
     {
-        // Считаем только листья (с Path), чтобы не суммировать родителей дважды
         var leaves = _selected.Where(n => !string.IsNullOrEmpty(n.Path)).ToList();
         long selBytes = leaves.Sum(n => n.SizeBytes);
         _actionBar.Update(leaves.Count, selBytes, _cacheModule.TotalSize);
@@ -349,7 +360,7 @@ public class MainWindow : Window
   Пробел         Выделить узел (и всё дерево под ним)
   Esc            Снять выделение
   Tab            Переключить вид (по пользователю / по базе)
-  Shift+Del      Dry Run для выделенного
+  Shift+Del      Dry Run — предпросмотр удаления
   Del            Удалить выделенное
   F5             Обновить дерево
   F1             Помощь

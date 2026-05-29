@@ -14,9 +14,15 @@ public class ActionBar : View
         Width = Dim.Fill();
         Y = Pos.AnchorEnd(2);
 
-        _keysLabel = new Label("[Пробел] Выделить  [Shift+Del] Dry Run  [Del] Удалить  [Tab] Сменить вид  [F5] Обновить  [F1] Помощь  [F10] Выход")
+        var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        var build = ver?.Revision > 0 ? $"  build {ver.Revision}" : "";
+        var verStr = $"  v{Program.VERSION}{build}";
+
+        _keysLabel = new Label(
+            $"[Пробел] Выделить  [Shift+Del] Dry Run  [Del] Удалить  [Tab] Вид  [F5] Обновить  [F1] Помощь  [F10] Выход{verStr}")
         {
             X = 0, Y = 0,
+            Width = Dim.Fill(),
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.Cyan, Color.Black)
@@ -26,6 +32,7 @@ public class ActionBar : View
         _statsLabel = new Label("")
         {
             X = 0, Y = 1,
+            Width = Dim.Fill(),
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black)
