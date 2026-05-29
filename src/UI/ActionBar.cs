@@ -19,7 +19,7 @@ public class ActionBar : View
         var verStr = $"  v{Program.VERSION}{build}";
 
         _keysLabel = new Label(
-            $"[Пробел] Выделить  [Shift+Del] Dry Run  [Del] Удалить  [Tab] Вид  [F5] Обновить  [F1] Помощь  [F10] Выход{verStr}")
+            $"[Пробел] Выделить  [S] Сортировка  [Del] Удалить  [Shift+Del] Dry Run  [Tab] Вид  [F5] Обновить  [F1] Помощь  [F10] Выход{verStr}")
         {
             X = 0, Y = 0,
             Width = Dim.Fill(),
@@ -42,11 +42,12 @@ public class ActionBar : View
         Add(_keysLabel, _statsLabel);
     }
 
-    public void Update(int selectedCount, long selectedBytes, long cacheTotal)
+    public void Update(int selectedCount, long selectedBytes, long cacheTotal, string sortMode = "")
     {
         var sel = selectedCount > 0
             ? $"Выделено: {selectedCount} объект(а/ов)  │  {SafeDelete.FormatSize(selectedBytes)}  │  "
             : "Выделено: —  │  ";
-        _statsLabel.Text = sel + $"Кэш: {SafeDelete.FormatSize(cacheTotal)}";
+        var sortStr = !string.IsNullOrEmpty(sortMode) ? $"  │  Сорт: {sortMode}" : "";
+        _statsLabel.Text = sel + $"Кэш: {SafeDelete.FormatSize(cacheTotal)}{sortStr}";
     }
 }

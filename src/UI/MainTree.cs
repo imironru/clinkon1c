@@ -10,6 +10,7 @@ namespace Clinkon1C.UI;
 public class MainWindow : Window
 {
     private readonly TreeView _tree;
+    private readonly Label _colHeader;
     private readonly ActionBar _actionBar;
     private readonly MessagePanel _msgPanel;
     private readonly CacheModule _cacheModule;
@@ -18,10 +19,12 @@ public class MainWindow : Window
     private const string RepoUrl = "github.com/iMironRU/Clinkon1C";
 
     // Высоты фиксированных зон (строк)
-    private const int HeaderLines = 1;
-    private const int MsgLines    = 2;
-    private const int BarLines    = 2;
-    private const int FixedLines  = HeaderLines + MsgLines + BarLines;
+    private const int HeaderLines    = 1;
+    private const int ColHeaderLines = 1;
+    private const int MsgLines       = 2;
+    private const int BarLines       = 2;
+    // Строк внизу, для Dim.Fill — msg + bar
+    private const int BottomLines    = MsgLines + BarLines; // 4
 
     public MainWindow(CacheModule cacheModule, string? updateNotice = null) : base("")
     {
@@ -36,11 +39,11 @@ public class MainWindow : Window
             X = 0, Y = 0, Width = Dim.Fill(),
             ColorScheme = new ColorScheme
             {
-                Normal = Terminal.Gui.Attribute.Make(Color.Cyan, Color.Black)
+                Normal = Terminal.Gui.Attribute.Make(Color.Black, Color.Cyan)
             }
         };
 
-        // Уведомление об обновлении (если есть) — справа в той же строке
+        // Уведомление об обновлении — справа в той же строке
         if (!string.IsNullOrEmpty(updateNotice))
         {
             var notice = new Label($"  ★ Доступно обновление: {updateNotice}  ")
@@ -54,22 +57,42 @@ public class MainWindow : Window
             Add(notice);
         }
 
-        // ── Дерево ──────────────────────────────────────────────────────────
+        // ── Заголовок колонок (FAR-стиль) ────────────────────────────────────
+        _colHeader = new Label(BuildColHeaderText())
+        {
+            X = 0, Y = HeaderLines,
+            Width = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.Black, Color.Cyan)
+            }
+        };
+
+        // ── Дерево (FAR-стиль: синий фон) ────────────────────────────────────
         _tree = new TreeView
         {
             X = 0,
-            Y = HeaderLines,
+            Y = HeaderLines + ColHeaderLines,
             Width = Dim.Fill(),
-            Height = Dim.Fill(FixedLines - HeaderLines) // Fill минус msg+bar
+            Height = Dim.Fill(BottomLines)
         };
 
-        // ── Панель сообщений (над статусной строкой) ─────────────────────────
+        _tree.ColorScheme = new ColorScheme
+        {
+            Normal    = Terminal.Gui.Attribute.Make(Color.White,      Color.Blue),
+            Focus     = Terminal.Gui.Attribute.Make(Color.White,      Color.Blue),
+            HotNormal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Blue),
+            HotFocus  = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Blue),
+            Disabled  = Terminal.Gui.Attribute.Make(Color.DarkGray,   Color.Blue)
+        };
+
+        // ── Панель сообщений ─────────────────────────────────────────────────
         _msgPanel = new MessagePanel();
 
-        // ── Статусная строка ─────────────────────────────────────────────────
+        // ── Статусная / командная строка ─────────────────────────────────────
         _actionBar = new ActionBar();
 
-        Add(header, _tree, _msgPanel, _actionBar);
+        Add(header, _colHeader, _tree, _msgPanel, _actionBar);
 
         _tree.KeyPress += OnTreeKeyPress;
         _tree.SelectionChanged += OnSelectionChanged;
@@ -83,6 +106,54 @@ public class MainWindow : Window
         });
     }
 
+    // ── Заголовок колонок ────────────────────────────────────────────────────
+    private string BuildColHeaderText()
+    {
+        bool bySize = _cacheModule.SortBy == SortMode.BySize;
+        var nameLabel = bySize ? "  Имя" : "  Имя ▲";
+        var sizeLabel = bySize ? "Размер ▼" : "Размер";
+        int contentWidth = CacheModule.NameColWidth + 2 + CacheModule.SizeColWidth;
+        int spaces = Math.Max(2, contentWidth + 4 - nameLabel.Length - sizeLabel.Length);
+        return nameLabel + new string(' ', spaces) + sizeLabel;
+    }
+
+    private void UpdateColHeader()
+    {
+        _colHeader.Text = BuildColHeaderText();
+        _colHeader.SetNeedsDisplay();
+    }
+
+    // ── Цветовой рендерер узлов ──────────────────────────────────────────────
+    private void SetupColorRenderer()
+    {
+        _tree.ColorGetter = (node) =>
+        {
+            if (node is CacheTreeNode cn)
+            {
+                if (cn.IsExcluded)
+                    return new ColorScheme
+                    {
+                        Normal = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Blue),
+                        Focus  = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Cyan)
+                    };
+                if (_selected.Contains(cn))
+                    return new ColorScheme
+                    {
+                        Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Blue),
+                        Focus  = Terminal.Gui.Attribute.Make(Color.Black,        Color.BrightYellow)
+                    };
+                if (cn.IsDead)
+                    return new ColorScheme
+                    {
+                        Normal = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Blue),
+                        Focus  = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Cyan)
+                    };
+            }
+            return null;
+        };
+    }
+
+    // ── Обновление дерева ────────────────────────────────────────────────────
     private void RefreshTree()
     {
         _selected.Clear();
@@ -142,39 +213,12 @@ public class MainWindow : Window
         if (nodes.Count > 0)
             _tree.SelectedObject = nodes[0];
 
+        UpdateColHeader();
         UpdateActionBar();
         _tree.SetNeedsDisplay();
     }
 
-    private void SetupColorRenderer()
-    {
-        _tree.ColorGetter = (node) =>
-        {
-            if (node is CacheTreeNode cn)
-            {
-                if (cn.IsExcluded)
-                    return new ColorScheme
-                    {
-                        Normal = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Black),
-                        Focus = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Blue)
-                    };
-                if (_selected.Contains(cn))
-                    return new ColorScheme
-                    {
-                        Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black),
-                        Focus = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Blue)
-                    };
-                if (cn.IsDead)
-                    return new ColorScheme
-                    {
-                        Normal = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Black),
-                        Focus = Terminal.Gui.Attribute.Make(Color.DarkGray, Color.Blue)
-                    };
-            }
-            return null;
-        };
-    }
-
+    // ── Обработка клавиш ─────────────────────────────────────────────────────
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs<ITreeNode> e)
     {
         UpdateActionBar();
@@ -226,8 +270,20 @@ public class MainWindow : Window
                 e.Handled = true;
                 break;
         }
+
+        // Буквенные клавиши: проверяем char-значение (не зависит от раскладки)
+        if (!e.Handled && (uint)e.KeyEvent.Key < 0x8000)
+        {
+            var ch = char.ToLower((char)(uint)e.KeyEvent.Key);
+            if (ch == 's')
+            {
+                ToggleSortMode();
+                e.Handled = true;
+            }
+        }
     }
 
+    // ── Выделение ────────────────────────────────────────────────────────────
     private void ToggleSelect()
     {
         if (_tree.SelectedObject is CacheTreeNode cn)
@@ -248,6 +304,7 @@ public class MainWindow : Window
             SelectRecursive(child);
     }
 
+    // ── Вид и сортировка ─────────────────────────────────────────────────────
     private void ToggleViewMode()
     {
         _cacheModule.ViewMode = _cacheModule.ViewMode == CacheViewMode.ByUser
@@ -256,6 +313,25 @@ public class MainWindow : Window
         RefreshTree();
     }
 
+    private void ToggleSortMode()
+    {
+        _cacheModule.SortBy = _cacheModule.SortBy == SortMode.ByName
+            ? SortMode.BySize
+            : SortMode.ByName;
+        // Перестраиваем дерево без повторного сканирования
+        _selected.Clear();
+        _tree.ClearObjects();
+        var nodes = _cacheModule.GetTree().ToList();
+        foreach (var n in nodes)
+            _tree.AddObject(n);
+        if (nodes.Count > 0)
+            _tree.SelectedObject = nodes[0];
+        UpdateColHeader();
+        UpdateActionBar();
+        _tree.SetNeedsDisplay();
+    }
+
+    // ── Dry Run ───────────────────────────────────────────────────────────────
     private void RunDryRun()
     {
         var targets = _selected.Count > 0
@@ -268,6 +344,7 @@ public class MainWindow : Window
         Dialogs.ShowDryRun(text);
     }
 
+    // ── Удаление ─────────────────────────────────────────────────────────────
     private void RunDelete()
     {
         var targets = _selected.Count > 0
@@ -344,13 +421,16 @@ public class MainWindow : Window
         return Enumerable.Empty<TreeNode>();
     }
 
+    // ── Статусная строка ─────────────────────────────────────────────────────
     private void UpdateActionBar()
     {
         var leaves = _selected.Where(n => !string.IsNullOrEmpty(n.Path)).ToList();
         long selBytes = leaves.Sum(n => n.SizeBytes);
-        _actionBar.Update(leaves.Count, selBytes, _cacheModule.TotalSize);
+        var sortStr = _cacheModule.SortBy == SortMode.BySize ? "Размер ▼" : "Имя ▲";
+        _actionBar.Update(leaves.Count, selBytes, _cacheModule.TotalSize, sortStr);
     }
 
+    // ── Помощь ────────────────────────────────────────────────────────────────
     private void ShowHelp()
     {
         Dialogs.ShowInfo("Помощь — Clinkon1C", @"
@@ -359,6 +439,7 @@ public class MainWindow : Window
   ←              Свернуть / подняться
   Пробел         Выделить узел (и всё дерево под ним)
   Esc            Снять выделение
+  S              Сортировка: Имя ▲ / Размер ▼
   Tab            Переключить вид (по пользователю / по базе)
   Shift+Del      Dry Run — предпросмотр удаления
   Del            Удалить выделенное

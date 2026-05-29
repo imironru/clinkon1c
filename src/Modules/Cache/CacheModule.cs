@@ -5,6 +5,7 @@ using Terminal.Gui.Trees;
 namespace Clinkon1C.Modules.Cache;
 
 public enum CacheViewMode { ByUser, ByBase }
+public enum SortMode { ByName, BySize }
 
 /// <summary>Физическое расположение папки кэша одной базы.</summary>
 public class CachePath
@@ -32,6 +33,30 @@ public class CacheModule : IModule
 {
     public string Name => "Кэш";
     public CacheViewMode ViewMode { get; set; } = CacheViewMode.ByUser;
+    public SortMode SortBy { get; set; } = SortMode.ByName;
+
+    // Ширина колонок для FAR-стиля
+    public const int NameColWidth = 46;
+    public const int SizeColWidth = 10;
+
+    /// <summary>Форматирует строку узла дерева: имя выровнено по ширине, размер — по правому краю.</summary>
+    public static string NodeLabel(string name, long bytes, bool excluded = false)
+    {
+        var sizeStr = SafeDelete.FormatSize(bytes);
+        var fullName = excluded ? $"{name} [исключён]" : name;
+        if (fullName.Length > NameColWidth)
+            fullName = fullName.Substring(0, NameColWidth - 1) + "…"; // …
+        return $"{fullName.PadRight(NameColWidth)}  {sizeStr.PadLeft(SizeColWidth)}";
+    }
+
+    /// <summary>Укорачивает длинный путь для отображения в ячейке имени.</summary>
+    private static string ShortPath(string path, string type)
+    {
+        var prefix = $"  {type}: ";
+        var available = NameColWidth - prefix.Length;
+        if (path.Length <= available) return prefix + path;
+        return prefix + "…" + path.Substring(path.Length - (available - 1));
+    }
 
     private List<CacheEntry> _entries = new List<CacheEntry>();
     public long TotalSize { get; private set; }
@@ -324,27 +349,31 @@ public class CacheModule : IModule
 
     private void BuildByUser(CacheTreeNode root, HashSet<string> exUsers, HashSet<string> exBases)
     {
-        foreach (var userGroup in _entries
-            .GroupBy(e => e.UserName, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g.Key))
+        var userGroups = _entries
+            .GroupBy(e => e.UserName, StringComparer.OrdinalIgnoreCase);
+
+        var sortedUsers = SortBy == SortMode.BySize
+            ? userGroups.OrderByDescending(g => g.Sum(e => e.SizeBytes))
+            : userGroups.OrderBy(g => g.Key);
+
+        foreach (var userGroup in sortedUsers)
         {
             bool exUser = exUsers.Contains(userGroup.Key);
             long userSize = userGroup.Sum(e => e.SizeBytes);
-            var label = exUser
-                ? $"{userGroup.Key}  [исключён]  [{SafeDelete.FormatSize(userSize)}]"
-                : $"{userGroup.Key}  [{SafeDelete.FormatSize(userSize)}]";
+            var label = NodeLabel(userGroup.Key, userSize, exUser);
 
             var userNode = new CacheTreeNode(label)
             { UserName = userGroup.Key, SizeBytes = userSize, IsExcluded = exUser };
 
-            foreach (var e in userGroup.OrderBy(e => e.BaseName))
+            var sortedEntries = SortBy == SortMode.BySize
+                ? (IEnumerable<CacheEntry>)userGroup.OrderByDescending(e => e.SizeBytes)
+                : userGroup.OrderBy(e => e.BaseName);
+
+            foreach (var e in sortedEntries)
             {
                 bool exBase = exBases.Contains(e.BaseName);
                 bool excluded = exUser || exBase;
-                var sizeStr = SafeDelete.FormatSize(e.SizeBytes);
-                var bl = excluded
-                    ? $"{e.BaseName}  [исключён]  [{sizeStr}]"
-                    : $"{e.BaseName}  [{sizeStr}]";
+                var bl = NodeLabel(e.BaseName, e.SizeBytes, excluded);
 
                 if (e.Paths.Count == 1)
                 {
@@ -365,7 +394,7 @@ public class CacheModule : IModule
                     };
                     foreach (var cp in e.Paths)
                     {
-                        var pathLabel = $"{cp.Type}: {cp.Path}  [{SafeDelete.FormatSize(cp.SizeBytes)}]";
+                        var pathLabel = NodeLabel(ShortPath(cp.Path, cp.Type), cp.SizeBytes);
                         baseNode.Children.Add(new CacheTreeNode(pathLabel)
                         {
                             UserName = e.UserName, BaseName = e.BaseName,
@@ -382,27 +411,31 @@ public class CacheModule : IModule
 
     private void BuildByBase(CacheTreeNode root, HashSet<string> exUsers, HashSet<string> exBases)
     {
-        foreach (var baseGroup in _entries
-            .GroupBy(e => e.BaseName, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g.Key))
+        var baseGroups = _entries
+            .GroupBy(e => e.BaseName, StringComparer.OrdinalIgnoreCase);
+
+        var sortedBases = SortBy == SortMode.BySize
+            ? baseGroups.OrderByDescending(g => g.Sum(e => e.SizeBytes))
+            : baseGroups.OrderBy(g => g.Key);
+
+        foreach (var baseGroup in sortedBases)
         {
             bool exBase = exBases.Contains(baseGroup.Key);
             long baseSize = baseGroup.Sum(e => e.SizeBytes);
-            var label = exBase
-                ? $"{baseGroup.Key}  [исключён]  [{SafeDelete.FormatSize(baseSize)}]"
-                : $"{baseGroup.Key}  [{SafeDelete.FormatSize(baseSize)}]";
+            var label = NodeLabel(baseGroup.Key, baseSize, exBase);
 
             var baseNode = new CacheTreeNode(label)
             { BaseName = baseGroup.Key, SizeBytes = baseSize, IsExcluded = exBase };
 
-            foreach (var e in baseGroup.OrderBy(e => e.UserName))
+            var sortedEntries = SortBy == SortMode.BySize
+                ? (IEnumerable<CacheEntry>)baseGroup.OrderByDescending(e => e.SizeBytes)
+                : baseGroup.OrderBy(e => e.UserName);
+
+            foreach (var e in sortedEntries)
             {
                 bool exUser = exUsers.Contains(e.UserName);
                 bool excluded = exUser || exBase;
-                var sizeStr = SafeDelete.FormatSize(e.SizeBytes);
-                var ul = excluded
-                    ? $"{e.UserName}  [исключён]  [{sizeStr}]"
-                    : $"{e.UserName}  [{sizeStr}]";
+                var ul = NodeLabel(e.UserName, e.SizeBytes, excluded);
 
                 if (e.Paths.Count == 1)
                 {
@@ -422,7 +455,7 @@ public class CacheModule : IModule
                     };
                     foreach (var cp in e.Paths)
                     {
-                        var pathLabel = $"{cp.Type}: {cp.Path}  [{SafeDelete.FormatSize(cp.SizeBytes)}]";
+                        var pathLabel = NodeLabel(ShortPath(cp.Path, cp.Type), cp.SizeBytes);
                         userNode.Children.Add(new CacheTreeNode(pathLabel)
                         {
                             UserName = e.UserName, BaseName = e.BaseName,
