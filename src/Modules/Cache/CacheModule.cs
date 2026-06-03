@@ -155,7 +155,7 @@ public class CacheModule
                 existing.SizeBytes += size;
                 TotalSize += size;
                 // Если для первого пути не нашли имя, но для этого нашли — обновляем
-                if (!isDead && existing.IsDead)
+                if (!isDead && existing.IsDead && baseName != null)
                 {
                     existing.BaseName = baseName;
                     existing.IsDead = false;
@@ -167,7 +167,7 @@ public class CacheModule
                 _entries.Add(new CacheEntry
                 {
                     UserName = userName,
-                    BaseName = baseName,
+                    BaseName = baseName ?? $"[неизвестная: {uuid.Substring(0, 8)}]",
                     Uuid = uuid,
                     Paths = new List<CachePath>
                     {

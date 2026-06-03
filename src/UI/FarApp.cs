@@ -1198,10 +1198,10 @@ public class FarApp
         {
             var baseItems = lvl.Items.Where(i => !i.IsUp).ToList();
             int marked    = baseItems.Count(i => i.BaseName != null && _markedBases.Contains(i.BaseName));
-            var info = marked > 0
+            var basesInfo = marked > 0
                 ? $"  {baseItems.Count} баз  │  Отмечено: {marked}  │  [C] Копировать  [E] Экспорт .v8i"
                 : $"  {baseItems.Count} баз  │  [C] Копировать  [E] Экспорт .v8i";
-            R.BoxRow(InfoRow, info, R.HdrFg, R.HdrBg);
+            R.BoxRow(InfoRow, basesInfo, R.HdrFg, R.HdrBg);
             return;
         }
 
