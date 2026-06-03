@@ -14,7 +14,8 @@ internal enum NavLevelKind
     CacheUnknown,    // неизвестные папки
     CachePaths,      // Local/Roaming пути одной базы
     TemplatesRoot,   // список пользователей с шаблонами
-    TemplatesUser    // шаблоны конкретного пользователя
+    TemplatesUser,   // шаблоны конкретного пользователя
+    TemplatesGroup   // содержимое одного шаблона (версии / подпапки)
 }
 
 internal class NavItem
@@ -40,10 +41,11 @@ internal class NavLevel
     public NavLevelKind Kind  { get; init; } = NavLevelKind.Home;
     public string Title { get; init; } = "";
     public List<NavItem> Items { get; init; } = new List<NavItem>();
-    public int Cursor { get; set; }
-    public int ScrollTop { get; set; }
-    // Контекст для drill-down вглубь
-    public string? ContextUser { get; init; }
+    public int     Cursor      { get; set; }
+    public int     ScrollTop   { get; set; }
+    // Контекст для drill-down
+    public string? ContextUser { get; init; }  // для кэша — имя пользователя
+    public string? ContextPath { get; init; }  // для TemplatesGroup — путь к папке шаблона
 }
 
 // ── Главное приложение ───────────────────────────────────────────────────────
@@ -522,10 +524,13 @@ public class FarApp
         var items = new List<NavItem> { UpItem() };
         foreach (var e in sorted)
         {
+            // Директории можно открыть (внутри — версии/подпапки)
+            bool isDir = Directory.Exists(e.Path);
             items.Add(new NavItem
             {
                 Name      = e.Name,
                 SizeBytes = e.SizeBytes,
+                CanEnter  = isDir,
                 Paths     = new List<string> { e.Path },
                 UserName  = e.UserName
             });
@@ -538,6 +543,52 @@ public class FarApp
             Title       = $"{user}  →  Шаблоны [{SafeDelete.FormatSize(total)}]",
             Items       = items,
             ContextUser = user
+        };
+    }
+
+    /// <summary>Содержимое одного шаблона: версии, подпапки, файлы.</summary>
+    private NavLevel MakeTemplatesGroupLevel(string groupPath, string groupName)
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        try
+        {
+            var entries = Directory.GetFileSystemEntries(groupPath)
+                .Select(p => (
+                    Path: p,
+                    Name: Path.GetFileName(p),
+                    Size: SafeDelete.Measure(p).size,
+                    IsDir: Directory.Exists(p)))
+                .ToList();
+
+            var sorted = _cache.SortBy == SortMode.BySize
+                ? entries.OrderByDescending(e => e.Size)
+                : entries.OrderBy(e => e.Name);
+
+            foreach (var e in sorted)
+            {
+                items.Add(new NavItem
+                {
+                    Name      = e.Name,
+                    SizeBytes = e.Size,
+                    // Подпапки тоже можно открыть для просмотра/удаления отдельных файлов
+                    CanEnter  = e.IsDir,
+                    Paths     = new List<string> { e.Path }
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"TemplatesGroup: {groupPath}: {ex.Message}");
+        }
+
+        long total = items.Where(i => !i.IsUp).Sum(i => i.SizeBytes);
+        return new NavLevel
+        {
+            Kind        = NavLevelKind.TemplatesGroup,
+            Title       = $"{groupName}  [{SafeDelete.FormatSize(total)}]",
+            Items       = items,
+            ContextPath = groupPath
         };
     }
 
@@ -605,6 +656,18 @@ public class FarApp
                 if (item.UserName != null)
                     _nav.Push(MakeTemplatesUserLevel(item.UserName));
                 break;
+
+            case NavLevelKind.TemplatesUser:
+                // Шаблон-директория → показываем версии/подпапки
+                if (item.Paths.Count > 0)
+                    _nav.Push(MakeTemplatesGroupLevel(item.Paths[0], item.Name));
+                break;
+
+            case NavLevelKind.TemplatesGroup:
+                // Подпапка версии → ещё один уровень (рекурсивно)
+                if (item.Paths.Count > 0)
+                    _nav.Push(MakeTemplatesGroupLevel(item.Paths[0], item.Name));
+                break;
         }
     }
 
@@ -634,6 +697,11 @@ public class FarApp
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
+                break;
+            case NavLevelKind.TemplatesGroup:
+                if (cur.ContextPath != null)
+                    rebuilt = MakeTemplatesGroupLevel(
+                        cur.ContextPath, Path.GetFileName(cur.ContextPath) ?? cur.Title);
                 break;
         }
 
