@@ -27,7 +27,7 @@ public class CacheEntry
     public bool IsDead { get; set; }
 }
 
-public class CacheModule : IModule
+public class CacheModule
 {
     public string Name => "Кэш";
     public CacheViewMode ViewMode { get; set; } = CacheViewMode.ByUser;
