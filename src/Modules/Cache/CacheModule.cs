@@ -238,15 +238,33 @@ public class CacheModule
     /// </summary>
     private static Dictionary<string, string> ParseIBases(string appData)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var result  = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var scanned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var ibasesPath = Path.Combine(appData, "1C", "1CEStart", "ibases.v8i");
-        ParseV8iFile(ibasesPath, result);
+        // 1. Стандартный ibases.v8i пользователя
+        ParseV8iFileOnce(Path.Combine(appData, "1C", "1CEStart", "ibases.v8i"), result, scanned);
 
-        var cfgPath = Path.Combine(appData, "1C", "1CEStart", "1CEStart.cfg");
-        ParseCfgCommonBases(cfgPath, result);
+        // 2. CommonInfoBases из пользовательского 1CEStart.cfg (путь к .v8i файлу)
+        foreach (var v8iPath in CfgHelper.GetValues(CfgHelper.UserPath(appData), "CommonInfoBases"))
+            ParseV8iFileOnce(v8iPath, result, scanned);
+
+        // 3. CommonInfoBases из системного 1CEStart.cfg (%ALLUSERSPROFILE%)
+        foreach (var v8iPath in CfgHelper.GetValues(CfgHelper.AllUsersPath, "CommonInfoBases"))
+            ParseV8iFileOnce(v8iPath, result, scanned);
 
         return result;
+    }
+
+    private static void ParseV8iFileOnce(
+        string path, Dictionary<string, string> result, HashSet<string> scanned)
+    {
+        try
+        {
+            var full = Path.GetFullPath(path);
+            if (!scanned.Add(full)) return;  // уже парсили этот файл
+            ParseV8iFile(full, result);
+        }
+        catch { }
     }
 
     /// <summary>
@@ -284,74 +302,6 @@ public class CacheModule
         }
         // Последняя секция
         FlushSection(result, secName, secId, secCache);
-    }
-
-    /// <summary>
-    /// Парсит секцию [CommonInfoBases] из 1CEStart.cfg.
-    /// Внутри неё — подсекции [ИмяБазы] с теми же полями ID= и LocalCache=.
-    /// </summary>
-    private static void ParseCfgCommonBases(string path, Dictionary<string, string> result)
-    {
-        if (!File.Exists(path)) return;
-
-        bool inCommon = false;
-        string? secName = null;
-        string? secId = null;
-        string? secCache = null;
-
-        // Известные топ-уровневые секции (не имена баз)
-        var topSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "CommonInfoBases", "UserInfoBases", "RecentBases",
-            "GeneralSettings", "ConnectionSettings", "UpdateSettings"
-        };
-
-        foreach (var rawLine in File.ReadAllLines(path))
-        {
-            var t = rawLine.Trim();
-
-            if (t.StartsWith("[") && t.EndsWith("]"))
-            {
-                var sectionName = t.Substring(1, t.Length - 2);
-
-                if (sectionName.Equals("CommonInfoBases", StringComparison.OrdinalIgnoreCase))
-                {
-                    FlushSection(result, secName, secId, secCache);
-                    secName = null; secId = null; secCache = null;
-                    inCommon = true;
-                    continue;
-                }
-
-                if (topSections.Contains(sectionName))
-                {
-                    // Переходим в другую топ-секцию — выходим из CommonInfoBases
-                    if (inCommon) FlushSection(result, secName, secId, secCache);
-                    secName = null; secId = null; secCache = null;
-                    inCommon = false;
-                    continue;
-                }
-
-                if (inCommon)
-                {
-                    // Подсекция внутри CommonInfoBases — имя базы
-                    FlushSection(result, secName, secId, secCache);
-                    secName = sectionName;
-                    secId = null; secCache = null;
-                }
-                continue;
-            }
-
-            if (inCommon)
-            {
-                if (t.StartsWith("ID=", StringComparison.OrdinalIgnoreCase))
-                    secId = t.Substring(3).Trim();
-                else if (t.StartsWith("LocalCache=", StringComparison.OrdinalIgnoreCase))
-                    secCache = t.Substring("LocalCache=".Length).Trim().Trim('/');
-            }
-        }
-
-        if (inCommon)
-            FlushSection(result, secName, secId, secCache);
     }
 
     /// <summary>
