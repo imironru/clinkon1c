@@ -114,6 +114,125 @@ internal static class ConsoleDialog
         Console.Write(R.Fit("↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть", w - 4));
     }
 
+    // ── Мультиселект ────────────────────────────────────────────────────────
+    /// <summary>Диалог с чекбоксами. Возвращает индексы отмеченных элементов.</summary>
+    public static List<int> MultiSelect(string title, string[] items)
+    {
+        var marked  = new bool[items.Length];
+        int cursor  = 0;
+        int scroll  = 0;
+        int visible = Math.Max(1, Math.Min(items.Length, Console.WindowHeight - 8));
+        int w       = Math.Min(Console.WindowWidth - 4, 72);
+        int h       = visible + 5;
+        int x       = (Console.WindowWidth  - w) / 2;
+        int y       = Math.Max(0, (Console.WindowHeight - h) / 2);
+
+        while (true)
+        {
+            // Рамка
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, title);
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            // Список
+            for (int i = 0; i < visible; i++)
+            {
+                int idx = scroll + i;
+                if (idx >= items.Length) break;
+                bool isCur = idx == cursor;
+                var check = marked[idx] ? "[x]" : "[ ]";
+                var line  = $"  {check} {items[idx]}";
+                if (isCur) CC(ConsoleColor.Black, ConsoleColor.Cyan);
+                else        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+                Pos(x + 2, y + 2 + i);
+                Console.Write(R.Fit(line, w - 4));
+            }
+
+            // Подсказка
+            CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + h - 2);
+            Console.Write(R.Fit("[Пробел] Отметить  [A] Все  [Enter] OK  [Esc] Отмена", w - 4));
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.UpArrow && cursor > 0)
+            {
+                cursor--;
+                if (cursor < scroll) scroll = cursor;
+            }
+            else if (k.Key == ConsoleKey.DownArrow && cursor < items.Length - 1)
+            {
+                cursor++;
+                if (cursor >= scroll + visible) scroll = cursor - visible + 1;
+            }
+            else if (k.Key == ConsoleKey.Spacebar)
+                marked[cursor] = !marked[cursor];
+            else if (k.Key == ConsoleKey.A || k.KeyChar == 'a' || k.KeyChar == 'A')
+            {
+                bool allOn = marked.All(m => m);
+                for (int i = 0; i < marked.Length; i++) marked[i] = !allOn;
+            }
+            else if (k.Key == ConsoleKey.Enter)
+            {
+                var result = new List<int>();
+                for (int i = 0; i < marked.Length; i++)
+                    if (marked[i]) result.Add(i);
+                return result;
+            }
+            else if (k.Key == ConsoleKey.Escape)
+                return new List<int>();
+        }
+    }
+
+    // ── Ввод текста ──────────────────────────────────────────────────────────
+    /// <summary>Диалог ввода текстовой строки. null = отмена.</summary>
+    public static string? InputText(string title, string prompt, string defaultValue = "")
+    {
+        var input = new System.Text.StringBuilder(defaultValue);
+        var lines = prompt.Split('\n');
+        int w     = Math.Min(Console.WindowWidth - 4, 68);
+        int h     = lines.Length + 6;
+        int x     = (Console.WindowWidth  - w) / 2;
+        int y     = Math.Max(0, (Console.WindowHeight - h) / 2);
+
+        while (true)
+        {
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, title);
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                Pos(x + 2, y + 2 + i);
+                Console.Write(R.Fit(lines[i], w - 4));
+            }
+
+            // Поле ввода
+            int inputY = y + 2 + lines.Length + 1;
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Pos(x + 2, inputY - 1);
+            Console.Write(new string(' ', w - 4));
+            Pos(x + 2, inputY);
+            CC(ConsoleColor.Black, ConsoleColor.Cyan);
+            var display = input.ToString();
+            if (display.Length > w - 6) display = display.Substring(display.Length - (w - 6));
+            Console.Write(R.Fit("> " + display, w - 4));
+
+            CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + h - 2);
+            Console.Write(R.Fit("[Enter] Сохранить    [Esc] Отмена", w - 4));
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Enter)  return input.ToString();
+            if (k.Key == ConsoleKey.Escape) return null;
+            if (k.Key == ConsoleKey.Backspace && input.Length > 0)
+                input.Remove(input.Length - 1, 1);
+            else if (!char.IsControl(k.KeyChar))
+                input.Append(k.KeyChar);
+        }
+    }
+
     // ── Примитивы (прямой вывод в Console) ───────────────────────────────────
     private static void CC(ConsoleColor fg, ConsoleColor bg)
     { Console.ForegroundColor = fg; Console.BackgroundColor = bg; }

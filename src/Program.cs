@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Principal;
 using System.Text.Json.Serialization;
 using Clinkon1C.Core;
+using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Templates;
 using Clinkon1C.UI;
@@ -95,7 +96,8 @@ class Program
         {
             var cache     = new CacheModule();
             var templates = new TemplatesModule();
-            new FarApp(cache, templates, updateNotice).Run();
+            var bases     = new BasesModule();
+            new FarApp(cache, templates, bases, updateNotice).Run();
         }
         finally
         {

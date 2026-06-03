@@ -1,4 +1,5 @@
 using Clinkon1C.Core;
+using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Templates;
 
@@ -15,7 +16,8 @@ internal enum NavLevelKind
     CachePaths,      // Local/Roaming пути одной базы
     TemplatesRoot,   // список пользователей с шаблонами
     TemplatesUser,   // шаблоны конкретного пользователя
-    TemplatesGroup   // содержимое одного шаблона (версии / подпапки)
+    TemplatesGroup,  // содержимое одного шаблона (версии / подпапки)
+    BasesRoot        // список информационных баз
 }
 
 internal class NavItem
@@ -27,7 +29,8 @@ internal class NavItem
     public bool   IsUp           { get; init; }  // строка [..]
     public bool   CanEnter       { get; init; }  // можно провалиться внутрь
     public bool   IsUnknownGroup { get; init; }  // группа [Неизвестные]
-    public string? ModuleId      { get; init; }  // "cache" / "templates" (для Home уровня)
+    public string? ModuleId      { get; init; }  // "cache" / "templates" / "bases"
+    public string? Description   { get; init; }  // для Баз: Connect= строка
     // Физические пути для выделения/удаления
     public List<string> Paths { get; init; } = new List<string>();
     // Для drill-down
@@ -56,7 +59,12 @@ public class FarApp
 
     private readonly CacheModule     _cache;
     private readonly TemplatesModule _templates;
+    private readonly BasesModule     _bases;
     private readonly string?         _updateNotice;
+
+    // Отмеченные базы (по Connect= строке как ключу)
+    private readonly HashSet<string> _markedBases =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavLevel> _nav = new Stack<NavLevel>();
     private readonly HashSet<string> _sel =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -80,10 +88,12 @@ public class FarApp
     private static int NameW      => InnerW - SizeCW; // ширина колонки имени
 
     // ── Запуск ───────────────────────────────────────────────────────────────
-    public FarApp(CacheModule cache, TemplatesModule templates, string? updateNotice = null)
+    public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
+                  string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
+        _bases        = bases;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -136,6 +146,8 @@ public class FarApp
             {
                 _cache.Refresh(msg     => { status = msg; });
                 _templates.Refresh(msg => { status = "Шаблоны: " + msg; });
+                status = "Загрузка списка баз...";
+                _bases.Refresh();
             }
             catch (Exception ex) { Logger.Error($"Сканирование: {ex.Message}"); }
             finally { done = true; }
@@ -202,6 +214,15 @@ public class FarApp
                     CanEnter  = _templates.Entries.Count > 0,
                     ModuleId  = "templates",
                     Paths     = tmplPaths
+                },
+                new NavItem
+                {
+                    Name      = "Базы",
+                    SizeBytes = 0,
+                    CanEnter  = true,
+                    ModuleId  = "bases",
+                    Paths     = new List<string>(),
+                    Description = $"{_bases.Entries.Count} записей"
                 }
             }
         };
@@ -592,6 +613,39 @@ public class FarApp
         };
     }
 
+    // ── Базы ─────────────────────────────────────────────────────────────────
+
+    private NavLevel MakeBasesLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        var sorted = _cache.SortBy == SortMode.BySize
+            ? _bases.Entries.OrderByDescending(e => e.Name)
+            : _bases.Entries.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var e in sorted)
+        {
+            // Укорачиваем Connect= для отображения
+            var conn = e.Connect;
+            if (conn.Length > 45) conn = conn.Substring(0, 42) + "…";
+
+            items.Add(new NavItem
+            {
+                Name        = e.Name,
+                SizeBytes   = 0,
+                BaseName    = e.Connect,    // ключ для _markedBases
+                Description = conn          // строка подключения для отображения
+            });
+        }
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.BasesRoot,
+            Title = $"Базы [{_bases.Entries.Count}]",
+            Items = items
+        };
+    }
+
     private static string ShortenPath(string path)
     {
         const int max = 38;
@@ -617,6 +671,8 @@ public class FarApp
                     _nav.Push(MakeCacheLevel());
                 else if (item.ModuleId == "templates")
                     _nav.Push(MakeTemplatesLevel());
+                else if (item.ModuleId == "bases")
+                    _nav.Push(MakeBasesLevel());
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -694,6 +750,7 @@ public class FarApp
                 if (cur.ContextUser != null) rebuilt = MakeUnknownLevel(cur.ContextUser);
                 else                          rebuilt = MakeUnknownFlatLevel();
                 break;
+            case NavLevelKind.BasesRoot:      rebuilt = MakeBasesLevel();     break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -716,6 +773,20 @@ public class FarApp
     private void ToggleSel()
     {
         var lvl = _nav.Peek();
+
+        // Отдельная логика для раздела Баз
+        if (lvl.Kind == NavLevelKind.BasesRoot)
+        {
+            var bItem = lvl.Items[lvl.Cursor];
+            if (!bItem.IsUp && bItem.BaseName != null)
+            {
+                if (!_markedBases.Remove(bItem.BaseName))
+                    _markedBases.Add(bItem.BaseName);
+                MoveCursor(1);
+            }
+            return;
+        }
+
         var item = lvl.Items[lvl.Cursor];
         if (item.IsUp || item.IsExcluded || item.Paths.Count == 0) return;
 
@@ -774,6 +845,7 @@ public class FarApp
 
             case ConsoleKey.Escape:
                 _sel.Clear();
+                _markedBases.Clear();
                 break;
 
             case ConsoleKey.Delete when (k.Modifiers & ConsoleModifiers.Shift) != 0:
@@ -808,6 +880,7 @@ public class FarApp
                 break;
 
             default:
+                var kind2 = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
                 char ch = char.ToLower(k.KeyChar);
                 if (ch == 's')
                 {
@@ -815,6 +888,10 @@ public class FarApp
                         ? SortMode.BySize : SortMode.ByName;
                     RebuildCurrentLevel();
                 }
+                else if (ch == 'c' && kind2 == NavLevelKind.BasesRoot)
+                    DoCopyBases();
+                else if (ch == 'e' && kind2 == NavLevelKind.BasesRoot)
+                    DoExportBases();
                 break;
         }
     }
@@ -887,6 +964,83 @@ public class FarApp
         Rescan();
     }
 
+    // ── Действия с базами ─────────────────────────────────────────────────────
+
+    private List<InfoBaseEntry> GetMarkedBases()
+    {
+        if (_markedBases.Count > 0)
+            return _bases.Entries.Where(e => _markedBases.Contains(e.Connect)).ToList();
+        // Ничего не отмечено — предлагаем текущий под курсором
+        var lvl  = _nav.Peek();
+        var item = lvl.Items[lvl.Cursor];
+        if (!item.IsUp && item.BaseName != null)
+        {
+            var e = _bases.Entries.FirstOrDefault(b =>
+                string.Equals(b.Connect, item.BaseName, StringComparison.OrdinalIgnoreCase));
+            if (e != null) return new List<InfoBaseEntry> { e };
+        }
+        return new List<InfoBaseEntry>();
+    }
+
+    private void DoCopyBases()
+    {
+        var entries = GetMarkedBases();
+        if (entries.Count == 0) return;
+
+        var profiles = ProfileFinder.FindProfiles();
+        if (profiles.Count == 0) { ConsoleDialog.ShowText("Базы", "Профили не найдены."); R.Invalidate(); return; }
+
+        var names    = profiles.Select(p => p.UserName).ToArray();
+        var selected = ConsoleDialog.MultiSelect(
+            $"Копировать {entries.Count} баз(ы) пользователям", names);
+        R.Invalidate();
+        if (selected.Count == 0) return;
+
+        int totalAdded = 0, totalSkipped = 0;
+        foreach (var idx in selected)
+        {
+            var (added, skipped) = _bases.CopyToUser(entries, profiles[idx]);
+            totalAdded   += added;
+            totalSkipped += skipped;
+        }
+
+        ConsoleDialog.ShowText("Копирование завершено",
+            $"Профилей: {selected.Count}\n" +
+            $"Добавлено записей: {totalAdded}\n" +
+            $"Уже существовало: {totalSkipped}");
+        R.Invalidate();
+        _markedBases.Clear();
+    }
+
+    private void DoExportBases()
+    {
+        var entries = GetMarkedBases();
+        if (entries.Count == 0) return;
+
+        var fileName = ConsoleDialog.InputText(
+            "Экспорт в .v8i",
+            $"Будет сохранено {entries.Count} баз.\nФайл появится на рабочем столе.\n\nИмя файла (без расширения):",
+            "bases");
+        R.Invalidate();
+
+        if (string.IsNullOrWhiteSpace(fileName)) return;
+
+        // Убираем недопустимые символы
+        foreach (var c in Path.GetInvalidFileNameChars())
+            fileName = fileName.Replace(c.ToString(), "");
+        if (string.IsNullOrWhiteSpace(fileName)) fileName = "bases";
+
+        var desktop  = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var filePath = Path.Combine(desktop, fileName.Trim() + ".v8i");
+
+        _bases.ExportToV8i(entries, filePath);
+
+        ConsoleDialog.ShowText("Сохранено",
+            $"Файл:\n{filePath}\n\nЗаписей: {entries.Count}");
+        R.Invalidate();
+        _markedBases.Clear();
+    }
+
     private void ShowHelp()
     {
         ConsoleDialog.ShowText("Помощь — Clinkon1C",
@@ -956,11 +1110,21 @@ public class FarApp
 
     private void DrawColHeader()
     {
+        var kind = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
+
+        if (kind == NavLevelKind.BasesRoot)
+        {
+            const int namePartW = 32;
+            var content = R.Fit(" Имя", namePartW) + R.Fit("Подключение", InnerW - namePartW);
+            R.BoxRow(2, content, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         bool bySize = _cache.SortBy == SortMode.BySize;
         var nameLabel = bySize ? " Имя" : " Имя ▲";
         var sizeLabel = bySize ? "Размер ▼ " : "Размер   ";
-        var content = R.Fit(nameLabel, NameW) + sizeLabel.PadLeft(SizeCW);
-        R.BoxRow(2, content, R.HdrFg, R.HdrBg);
+        var colContent = R.Fit(nameLabel, NameW) + sizeLabel.PadLeft(SizeCW);
+        R.BoxRow(2, colContent, R.HdrFg, R.HdrBg);
     }
 
     private void DrawItems(NavLevel lvl)
@@ -1005,9 +1169,21 @@ public class FarApp
         {
             content = R.Fit(" [..]", InnerW);
         }
+        else if (item.Description != null && item.BaseName != null)
+        {
+            // Элемент раздела "Базы": [*] Имя    Connect=...
+            bool isMarkedBase = _markedBases.Contains(item.BaseName);
+            var  mark = isMarkedBase ? "*" : " ";
+            if (!isCursor)
+                fg = isMarkedBase ? R.SelFg : R.PanelFg;
+            const int namePartW = 32;
+            var name    = R.Fit($" {mark} {item.Name}", namePartW);
+            var connect = R.Fit(item.Description, InnerW - namePartW);
+            content = name + connect;
+        }
         else
         {
-            var arrow  = item.CanEnter ? "►" : " ";
+            var arrow   = item.CanEnter ? "►" : " ";
             var nameStr = R.Fit($" {arrow} {item.Name}", NameW);
             var sizeStr = SafeDelete.FormatSize(item.SizeBytes).PadLeft(SizeCW);
             content = nameStr + sizeStr;
@@ -1018,6 +1194,17 @@ public class FarApp
 
     private void DrawPanelInfo(NavLevel lvl)
     {
+        if (lvl.Kind == NavLevelKind.BasesRoot)
+        {
+            var baseItems = lvl.Items.Where(i => !i.IsUp).ToList();
+            int marked    = baseItems.Count(i => i.BaseName != null && _markedBases.Contains(i.BaseName));
+            var info = marked > 0
+                ? $"  {baseItems.Count} баз  │  Отмечено: {marked}  │  [C] Копировать  [E] Экспорт .v8i"
+                : $"  {baseItems.Count} баз  │  [C] Копировать  [E] Экспорт .v8i";
+            R.BoxRow(InfoRow, info, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         var items   = lvl.Items.Where(i => !i.IsUp).ToList();
         long total  = items.Sum(i => (long)i.SizeBytes);
         int selCnt  = items.Count(i => i.Paths.Any(p => _sel.Contains(p)));
@@ -1056,11 +1243,14 @@ public class FarApp
         var kind  = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
         var sort  = _cache.SortBy == SortMode.BySize ? "Размер▼" : "Имя▲";
         var view  = _cache.ViewMode == CacheViewMode.ByUser ? "По базе" : "По польз.";
+        bool isBases = kind == NavLevelKind.BasesRoot;
         bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
 
-        var bar = $"[Пробел] Выделить  [S] {sort}  [Del] Удалить  [Shift+Del] Dry Run"
-                + (showTab ? $"  [Tab] {view}" : "")
-                + $"  [F5] Обновить  [F1] ?  [F10] Выход  v{Program.VERSION}";
+        var bar = isBases
+            ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  v{Program.VERSION}"
+            : $"[Пробел] Выделить  [S] {sort}  [Del] Удалить  [Shift+Del] Dry Run"
+              + (showTab ? $"  [Tab] {view}" : "")
+              + $"  [F5] Обновить  [F1] ?  [F10] Выход  v{Program.VERSION}";
         R.FillRow(KeyRow, R.HdrFg, R.HdrBg);
         R.Put(0, KeyRow, bar, R.HdrFg, R.HdrBg);
     }
