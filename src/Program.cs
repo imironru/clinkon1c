@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.UI;
-using Terminal.Gui;
 
 namespace Clinkon1C;
 
@@ -155,20 +154,15 @@ class Program
         }
         catch { }
 
-        // Запуск TUI
-        Application.Init();
+        // Запуск приложения
+        Logger.Info($"Clinkon1C v{VERSION} запуск TUI");
         try
         {
-            var module = new CacheModule();
-            TreeBuilder.Register(module);
-
-            var win = new MainWindow(module, updateNotice);
-            Application.Top.Add(win);
-            Application.Run();
+            var cache = new CacheModule();
+            new FarApp(cache, updateNotice).Run();
         }
         finally
         {
-            Application.Shutdown();
             Logger.Info("Clinkon1C завершён");
         }
     }
