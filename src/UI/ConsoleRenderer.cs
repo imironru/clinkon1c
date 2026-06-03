@@ -1,8 +1,8 @@
 namespace Clinkon1C.UI;
 
 /// <summary>
-/// Низкоуровневые примитивы рисования.
-/// R — короткое имя для компактного кода.
+/// Рендерер с двойным буфером: всё рисуется в памяти, в терминал
+/// уходят только изменившиеся ячейки — без мерцания.
 /// </summary>
 internal static class R
 {
@@ -20,104 +20,146 @@ internal static class R
     public const ConsoleColor WarnFg   = ConsoleColor.Yellow;
     public const ConsoleColor InfoFg   = ConsoleColor.Gray;
 
-    public static int W => Console.WindowWidth;
-    public static int H => Console.WindowHeight;
+    // ── Двойной буфер ────────────────────────────────────────────────────────
+    private struct Cell { public char Ch; public ConsoleColor Fg, Bg; }
 
-    // ── Базовые операции ─────────────────────────────────────────────────────
-    public static void Clr(ConsoleColor fg, ConsoleColor bg)
+    private static Cell[] _cur  = Array.Empty<Cell>();
+    private static Cell[] _prev = Array.Empty<Cell>();
+    private static int    _w, _h;
+    private static bool   _dirty = true; // форсируем полную перерисовку при первом Flush
+
+    public static int W => _w;
+    public static int H => _h;
+
+    /// <summary>Инициализирует буфер под текущий размер терминала.</summary>
+    public static void Init()
     {
-        Console.ForegroundColor = fg;
-        Console.BackgroundColor = bg;
+        _w = Console.WindowWidth;
+        _h = Console.WindowHeight;
+        _cur  = new Cell[_w * _h];
+        _prev = new Cell[_w * _h];
+        _dirty = true;
     }
 
-    public static void At(int x, int y)
+    /// <summary>Переинициализирует буфер если терминал был изменён.</summary>
+    public static void CheckResize()
     {
-        try
-        {
-            int cx = x < 0 ? 0 : (x >= W ? W - 1 : x);
-            int cy = y < 0 ? 0 : (y >= H ? H - 1 : y);
-            Console.SetCursorPosition(cx, cy);
-        }
-        catch { }
+        if (Console.WindowWidth != _w || Console.WindowHeight != _h)
+            Init();
+    }
+
+    /// <summary>Следующий Flush перерисует весь экран (после диалогов, ресканов).</summary>
+    public static void Invalidate() => _dirty = true;
+
+    // ── Запись в текущий кадр ────────────────────────────────────────────────
+
+    private static void Set(int x, int y, char ch, ConsoleColor fg, ConsoleColor bg)
+    {
+        if ((uint)x >= (uint)_w || (uint)y >= (uint)_h) return;
+        int i = y * _w + x;
+        _cur[i].Ch = ch;
+        _cur[i].Fg = fg;
+        _cur[i].Bg = bg;
     }
 
     public static void Put(int x, int y, string s, ConsoleColor fg, ConsoleColor bg)
     {
-        Clr(fg, bg);
-        At(x, y);
-        int avail = W - x;
-        if (avail <= 0) return;
-        if (s.Length > avail) s = s.Substring(0, avail);
-        Console.Write(s);
+        for (int i = 0; i < s.Length; i++)
+            Set(x + i, y, s[i], fg, bg);
     }
 
-    /// <summary>Заполняет всю строку пробелами с заданными цветами.</summary>
     public static void FillRow(int y, ConsoleColor fg, ConsoleColor bg)
     {
-        Clr(fg, bg);
-        At(0, y);
-        Console.Write(new string(' ', W));
+        for (int x = 0; x < _w; x++)
+            Set(x, y, ' ', fg, bg);
     }
 
-    /// <summary>Подгоняет строку до точного числа символов (обрезает или дополняет пробелами).</summary>
+    // ── Сброс буфера в терминал ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Пишет в терминал только ячейки, изменившиеся с последнего Flush.
+    /// Устраняет мерцание: экран не очищается, обновляются лишь дельты.
+    /// </summary>
+    public static void Flush()
+    {
+        Console.CursorVisible = false;
+
+        ConsoleColor fg = (ConsoleColor)255;
+        ConsoleColor bg = (ConsoleColor)255;
+        int wx = -999, wy = -999; // последняя позиция записи
+
+        for (int y = 0; y < _h; y++)
+        {
+            int off = y * _w;
+            for (int x = 0; x < _w; x++)
+            {
+                int i = off + x;
+                ref Cell c = ref _cur[i];
+                ref Cell p = ref _prev[i];
+
+                // Пропускаем неизменившиеся ячейки (кроме форсированной перерисовки)
+                if (!_dirty && c.Ch == p.Ch && c.Fg == p.Fg && c.Bg == p.Bg)
+                    continue;
+
+                // Перемещаем курсор только если он не там, где нужно
+                if (wx + 1 != x || wy != y)
+                {
+                    try { Console.SetCursorPosition(x, y); }
+                    catch { continue; }
+                }
+
+                if (c.Fg != fg) { Console.ForegroundColor = c.Fg; fg = c.Fg; }
+                if (c.Bg != bg) { Console.BackgroundColor = c.Bg; bg = c.Bg; }
+                Console.Write(c.Ch == '\0' ? ' ' : c.Ch);
+
+                p  = c; // ячейка синхронизирована
+                wx = x;
+                wy = y;
+            }
+        }
+
+        _dirty = false;
+        Array.Clear(_cur, 0, _cur.Length); // очищаем кадр для следующей отрисовки
+    }
+
+    // ── Утилиты ──────────────────────────────────────────────────────────────
+
+    /// <summary>Подгоняет строку до точного числа символов (обрезает или дополняет).</summary>
     public static string Fit(string s, int len)
     {
         if (len <= 0) return "";
-        if (s.Length > len) return s.Substring(0, len - 1) + "…"; // …
+        if (s.Length > len) return s.Substring(0, len - 1) + "…";
         return s.PadRight(len);
     }
 
     // ── Рамки (двойная линия) ────────────────────────────────────────────────
-    // ╔ = ╔  ═ = ═  ╗ = ╗
-    // ║ = ║
-    // ╠ = ╠  ╣ = ╣
-    // ╚ = ╚  ╝ = ╝
 
     public static void BoxTop(int y, string? title)
     {
-        Clr(BorderFg, PanelBg);
-        At(0, y);
-        if (!string.IsNullOrEmpty(title))
+        string line;
+        if (string.IsNullOrEmpty(title))
         {
-            var t = "══ " + title + " ";
-            int rem = W - 2 - t.Length;
-            Console.Write("╔" + t + (rem > 0 ? new string('═', rem) : "") + "╗");
+            line = "╔" + new string('═', _w - 2) + "╗";
         }
         else
         {
-            Console.Write("╔" + new string('═', W - 2) + "╗");
+            var t   = "══ " + title + " ";
+            int rem = _w - 2 - t.Length;
+            line    = "╔" + t + (rem > 0 ? new string('═', rem) : "") + "╗";
         }
+        Put(0, y, line, BorderFg, PanelBg);
     }
 
-    public static void BoxBottom(int y)
-    {
-        Clr(BorderFg, PanelBg);
-        At(0, y);
-        Console.Write("╚" + new string('═', W - 2) + "╝");
-    }
+    public static void BoxBottom(int y) =>
+        Put(0, y, "╚" + new string('═', _w - 2) + "╝", BorderFg, PanelBg);
 
-    public static void BoxSep(int y)
-    {
-        Clr(BorderFg, PanelBg);
-        At(0, y);
-        Console.Write("╠" + new string('═', W - 2) + "╣");
-    }
+    public static void BoxSep(int y) =>
+        Put(0, y, "╠" + new string('═', _w - 2) + "╣", BorderFg, PanelBg);
 
-    /// <summary>Строка внутри рамки: ║ content ║</summary>
     public static void BoxRow(int y, string content, ConsoleColor fg, ConsoleColor bg)
     {
-        int inner = W - 2;
-        // Левый борт
-        Clr(BorderFg, PanelBg);
-        At(0, y);
-        Console.Write("║");
-        // Содержимое
-        Clr(fg, bg);
-        At(1, y);
-        Console.Write(Fit(content, inner));
-        // Правый борт
-        Clr(BorderFg, PanelBg);
-        At(W - 1, y);
-        Console.Write("║");
+        Set(0,      y, '║', BorderFg, PanelBg);
+        Put(1,      y, Fit(content, _w - 2), fg, bg);
+        Set(_w - 1, y, '║', BorderFg, PanelBg);
     }
 }

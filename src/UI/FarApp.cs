@@ -76,6 +76,7 @@ public class FarApp
 
         try
         {
+            R.Init();
             Rescan();
 
             while (_running)
@@ -130,26 +131,23 @@ public class FarApp
         if (err != null)
             Logger.Error($"Ошибка сканирования: {err.Message}");
 
+        R.Invalidate();          // диалог сканирования писал напрямую — перерисуем всё
         _nav.Push(MakeRootLevel());
     }
 
-    private void DrawScanDlg(string status, char sp)
+    private static void DrawScanDlg(string status, char sp)
     {
         int dw = Math.Min(58, R.W - 4);
-        int dh = 5;
         int dx = (R.W - dw) / 2;
-        int dy = (R.H - dh) / 2;
-        R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-        R.At(dx, dy);
-        Console.Write("╔" + new string('═', dw - 2) + "╗");
-        R.At(dx, dy + 1);
-        Console.Write("║" + R.Fit(" Clinkon1C — Сканирование", dw - 2) + "║");
-        R.At(dx, dy + 2);
-        Console.Write("║" + R.Fit($"  {sp}  {status}", dw - 2) + "║");
-        R.At(dx, dy + 3);
-        Console.Write("║" + new string(' ', dw - 2) + "║");
-        R.At(dx, dy + 4);
-        Console.Write("╚" + new string('═', dw - 2) + "╝");
+        int dy = (R.H - 5) / 2;
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        void At(int x, int y) { try { Console.SetCursorPosition(x, y); } catch { } }
+        At(dx, dy);     Console.Write("╔" + new string('═', dw - 2) + "╗");
+        At(dx, dy + 1); Console.Write("║" + R.Fit(" Clinkon1C — Сканирование", dw - 2) + "║");
+        At(dx, dy + 2); Console.Write("║" + R.Fit($"  {sp}  {status}", dw - 2) + "║");
+        At(dx, dy + 3); Console.Write("║" + new string(' ', dw - 2) + "║");
+        At(dx, dy + 4); Console.Write("╚" + new string('═', dw - 2) + "╝");
     }
 
     // ── Построение уровней ───────────────────────────────────────────────────
@@ -478,6 +476,7 @@ public class FarApp
         sb.AppendLine();
         sb.AppendLine("Итого: " + SafeDelete.FormatSize(total));
         ConsoleDialog.ShowText("Dry Run — предпросмотр", sb.ToString());
+        R.Invalidate();
     }
 
     private void DoDelete()
@@ -497,11 +496,15 @@ public class FarApp
             ok = ConsoleDialog.Confirm("Подтверждение удаления",
                 $"Удалить {paths.Count} объект(а)?\nОбъём: {SafeDelete.FormatSize(total)}");
 
+        R.Invalidate(); // после диалога подтверждения — восстанавливаем панель
         if (!ok) return;
 
         if (ProcessHelper.AnyRunning1CProcesses())
+        {
             if (!ConsoleDialog.Confirm("Предупреждение", "Запущены процессы 1С!\nПродолжить?"))
-                return;
+            { R.Invalidate(); return; }
+            R.Invalidate();
+        }
 
         Logger.Info($"Удаление: {paths.Count} путей");
         var res = SafeDelete.Delete(paths,
@@ -528,6 +531,7 @@ public class FarApp
   F5                         Пересканировать
   F1                         Помощь
   F10                        Выход");
+        R.Invalidate();
     }
 
     // ── Лог ───────────────────────────────────────────────────────────────────
@@ -551,8 +555,9 @@ public class FarApp
     // ── Рисование ─────────────────────────────────────────────────────────────
     private void Draw()
     {
-        var lvl = _nav.Peek();
+        R.CheckResize();   // переинициализируем буфер если терминал изменился
 
+        var lvl = _nav.Peek();
         DrawHeader();
         R.BoxTop(1, lvl.Title);
         DrawColHeader();
@@ -564,7 +569,7 @@ public class FarApp
         DrawMsg();
         DrawKeyBar();
 
-        Console.CursorVisible = false;
+        R.Flush();         // отправляем в терминал только изменившиеся ячейки
     }
 
     private void DrawHeader()

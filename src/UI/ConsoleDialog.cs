@@ -1,166 +1,137 @@
 namespace Clinkon1C.UI;
 
-/// <summary>FAR-подобные диалоговые окна на основе Console API.</summary>
+/// <summary>
+/// FAR-подобные диалоги. Пишут напрямую в Console (минуя буфер).
+/// После закрытия диалога вызывай R.Invalidate() чтобы восстановить панель.
+/// </summary>
 internal static class ConsoleDialog
 {
-    // ── Подтверждение Y/N ────────────────────────────────────────────────────
+    // ── Confirm Y/N ──────────────────────────────────────────────────────────
     public static bool Confirm(string title, string message)
     {
-        var lines = message.Split('\n');
-        DrawBox(title, lines, new[] { "[ Y ] Да", "[ N ] Нет", "[ Esc ] Отмена" });
+        Draw(title, message.Split('\n'), "[Y] Да    [N] Нет");
         while (true)
         {
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Y || k.KeyChar == 'y' || k.KeyChar == 'Y') return true;
             if (k.Key == ConsoleKey.N || k.KeyChar == 'n' || k.KeyChar == 'N') return false;
-            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)          return false;
         }
     }
 
-    // ── Подтверждение вводом слова ───────────────────────────────────────────
-    public static bool ConfirmWord(string title, string message, string confirmWord)
+    // ── Confirm + ввод слова ─────────────────────────────────────────────────
+    public static bool ConfirmWord(string title, string message, string word)
     {
-        var sb = new System.Text.StringBuilder();
+        var input = new System.Text.StringBuilder();
         while (true)
         {
-            var lines = message.Split('\n');
-            var extra = new[] { $"Введите «{confirmWord}» и Enter:", "> " + sb };
-            DrawBox(title, lines.Concat(extra).ToArray(), new[] { "[ Enter ] OK", "[ Esc ] Отмена" });
+            var lines = message.Split('\n').ToList();
+            lines.Add("");
+            lines.Add($"Введите «{word}» и нажмите Enter:");
+            lines.Add("> " + input);
+            Draw(title, lines.ToArray(), "[Enter] OK    [Esc] Отмена");
+
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape) return false;
             if (k.Key == ConsoleKey.Enter)
-                return string.Equals(sb.ToString(), confirmWord, StringComparison.Ordinal);
-            if (k.Key == ConsoleKey.Backspace && sb.Length > 0)
-                sb.Remove(sb.Length - 1, 1);
+                return string.Equals(input.ToString(), word, StringComparison.Ordinal);
+            if (k.Key == ConsoleKey.Backspace && input.Length > 0)
+                input.Remove(input.Length - 1, 1);
             else if (!char.IsControl(k.KeyChar))
-                sb.Append(k.KeyChar);
+                input.Append(k.KeyChar);
         }
     }
 
     // ── Текст со скроллом (Dry Run, Help) ────────────────────────────────────
     public static void ShowText(string title, string text)
     {
-        var lines = text.Split('\n');
+        var all = text.Split('\n');
         int scroll = 0;
-        int maxW = R.W - 6;
         while (true)
         {
-            DrawScrollText(title, lines, scroll, maxW);
+            DrawScroll(title, all, scroll);
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.F10) break;
-            if (k.Key == ConsoleKey.UpArrow && scroll > 0) scroll--;
-            if (k.Key == ConsoleKey.DownArrow && scroll < lines.Length - 1) scroll++;
-            if (k.Key == ConsoleKey.PageUp) scroll = Math.Max(0, scroll - 10);
-            if (k.Key == ConsoleKey.PageDown) scroll = Math.Min(Math.Max(0, lines.Length - 1), scroll + 10);
+            if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
+            if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 1);
+            if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - 10);
+            if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 10);
         }
     }
 
-    // ── Внутренние методы рисования ──────────────────────────────────────────
-    private static void DrawBox(string title, string[] lines, string[]? buttons)
+    // ── Внутренние методы ─────────────────────────────────────────────────────
+    private static void Draw(string title, string[] lines, string buttons)
     {
-        int w = Math.Min(R.W - 4, 70);
-        int contentLines = lines.Length + (buttons != null ? 2 : 0);
-        int h = contentLines + 4; // top border + title + sep + content + bottom border
-        h = Math.Min(h, R.H - 2);
-        int x = (R.W - w) / 2;
-        int y = (R.H - h) / 2;
+        int w   = Math.Min(Console.WindowWidth - 4, 72);
+        int h   = lines.Length + 5; // top + title row (inside) + sep + lines + buttons + bottom
+        h       = Math.Min(h, Console.WindowHeight - 2);
+        int x   = (Console.WindowWidth  - w) / 2;
+        int y   = (Console.WindowHeight - h) / 2;
 
-        // Заполняем область диалога
-        R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-        for (int row = y; row < y + h; row++)
-        {
-            R.At(0, row);
-            // тень
-        }
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, title);
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
 
-        // Рамка
-        R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-        DrawDialogTop(x, y, w, title);
-        for (int i = 0; i < h - 2; i++)
+        // Текст
+        for (int i = 0; i < lines.Length && y + 2 + i < y + h - 2; i++)
         {
-            R.At(x, y + 1 + i);
-            Console.Write("║" + new string(' ', w - 2) + "║");
-        }
-        DrawDialogBottom(x, y + h - 1, w);
-
-        // Контент
-        int lineY = y + 2;
-        foreach (var line in lines)
-        {
-            if (lineY >= y + h - 1) break;
-            R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-            R.At(x + 2, lineY++);
-            var s = line.Length > w - 4 ? line.Substring(0, w - 5) + "…" : line;
-            Console.Write(s);
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + 2 + i);
+            Console.Write(R.Fit(lines[i], w - 4));
         }
 
         // Кнопки
-        if (buttons != null)
-        {
-            int btnY = y + h - 2;
-            var btnStr = string.Join("  ", buttons);
-            R.Clr(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-            R.At(x + (w - btnStr.Length) / 2, btnY);
-            Console.Write(btnStr);
-        }
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        int bx = x + (w - buttons.Length) / 2;
+        Pos(bx, y + h - 2);
+        Console.Write(buttons);
     }
 
-    private static void DrawScrollText(string title, string[] lines, int scroll, int maxW)
+    private static void DrawScroll(string title, string[] lines, int scroll)
     {
-        int w = Math.Min(R.W - 4, maxW + 4);
-        int innerH = R.H - 6;
-        int h = innerH + 4;
-        int x = (R.W - w) / 2;
-        int y = 1;
+        int w      = Math.Min(Console.WindowWidth - 4, 78);
+        int innerH = Console.WindowHeight - 6;
+        int h      = innerH + 4;
+        int x      = (Console.WindowWidth  - w) / 2;
+        int y      = 1;
 
-        R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-        DrawDialogTop(x, y, w, title);
-        for (int i = 0; i < innerH + 2; i++)
-        {
-            R.At(x, y + 1 + i);
-            Console.Write("║" + new string(' ', w - 2) + "║");
-        }
-        DrawDialogBottom(x, y + h - 1, w);
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, title);
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
 
         for (int i = 0; i < innerH; i++)
         {
             int li = scroll + i;
-            string line = li < lines.Length ? lines[li] : "";
-            R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-            R.At(x + 2, y + 2 + i);
-            Console.Write(R.Fit(line, w - 4));
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + 2 + i);
+            Console.Write(R.Fit(li < lines.Length ? lines[li] : "", w - 4));
         }
 
-        // Подсказка
-        R.Clr(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        R.At(x + 2, y + h - 2);
-        Console.Write(R.Fit("↑↓ — прокрутка   Enter/Esc — закрыть", w - 4));
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        Pos(x + 2, y + h - 2);
+        Console.Write(R.Fit("↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть", w - 4));
     }
 
-    private static void DrawDialogTop(int x, int y, int w, string title)
+    // ── Примитивы (прямой вывод в Console) ───────────────────────────────────
+    private static void CC(ConsoleColor fg, ConsoleColor bg)
+    { Console.ForegroundColor = fg; Console.BackgroundColor = bg; }
+
+    private static void Pos(int x, int y)
+    { try { Console.SetCursorPosition(x, y); } catch { } }
+
+    private static void Top(int x, int y, int w, string title)
     {
-        R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-        R.At(x, y);
-        var t = "══ " + title + " ";
+        Pos(x, y);
+        var t   = "══ " + title + " ";
         int rem = w - 2 - t.Length;
         Console.Write("╔" + t + (rem > 0 ? new string('═', rem) : "") + "╗");
     }
 
-    private static void DrawDialogBottom(int x, int y, int w)
-    {
-        R.Clr(ConsoleColor.White, ConsoleColor.DarkBlue);
-        R.At(x, y);
-        Console.Write("╚" + new string('═', w - 2) + "╝");
-    }
+    private static void Bot(int x, int y, int w)
+    { Pos(x, y); Console.Write("╚" + new string('═', w - 2) + "╝"); }
 
-    private static string[] ToArray(IEnumerable<string> e) => e.ToArray();
-}
-
-internal static class EnumerableExt
-{
-    public static IEnumerable<string> Concat(this string[] a, string[] b)
-    {
-        foreach (var s in a) yield return s;
-        foreach (var s in b) yield return s;
-    }
+    private static void Row(int x, int y, int w)
+    { Pos(x, y); Console.Write("║" + new string(' ', w - 2) + "║"); }
 }
