@@ -51,6 +51,12 @@ public class CacheModule
         var profiles = ProfileFinder.FindProfiles();
         Logger.Info($"Найдено профилей: {profiles.Count}");
 
+        // Сканируем рабочие столы всех пользователей + Public Desktop
+        // на предмет .v8i файлов (базы, запускаемые не из стандартного ibases.v8i)
+        progress?.Invoke("Сканирование рабочих столов (.v8i)...");
+        var desktopIbases = CollectDesktopV8i(profiles);
+        Logger.Info($"CacheModule: Рабочие столы — {desktopIbases.Count} баз из .v8i файлов");
+
         int idx = 0;
         foreach (var profile in profiles)
         {
@@ -58,7 +64,13 @@ public class CacheModule
             progress?.Invoke($"[{idx}/{profiles.Count}] Сканирование: {profile.UserName}...");
 
             var ibases = ParseIBases(profile.AppData);
-            Logger.Info($"CacheModule: ParseIBases [{profile.UserName}]: {ibases.Count} баз: {string.Join(", ", ibases.Values)}");
+
+            // Добавляем UUID с рабочих столов (не перезаписываем уже найденные в ibases.v8i профиля)
+            foreach (var kv in desktopIbases)
+                if (!ibases.ContainsKey(kv.Key))
+                    ibases[kv.Key] = kv.Value;
+
+            Logger.Info($"CacheModule: ParseIBases [{profile.UserName}]: итого {ibases.Count} баз");
 
             // %LOCALAPPDATA%\1C\1cv8*\
             var localBase1C = Path.Combine(profile.LocalAppData, "1C");
@@ -166,6 +178,56 @@ public class CacheModule
                 });
                 TotalSize += size;
             }
+        }
+    }
+
+    // ── Сканирование рабочих столов ──────────────────────────────────────────
+
+    /// <summary>
+    /// Собирает UUID→название из всех .v8i файлов на рабочих столах пользователей
+    /// и на общем рабочем столе (C:\Users\Public\Desktop).
+    /// </summary>
+    private static Dictionary<string, string> CollectDesktopV8i(List<UserProfile> profiles)
+    {
+        var result  = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var scanned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Общий рабочий стол (Public Desktop)
+        try
+        {
+            var pub = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+            ScanDesktopFolder(pub, result, scanned);
+        }
+        catch { }
+
+        // Рабочий стол каждого профиля
+        foreach (var p in profiles)
+        {
+            try
+            {
+                var desk = Path.Combine(p.ProfilePath, "Desktop");
+                ScanDesktopFolder(desk, result, scanned);
+            }
+            catch { }
+        }
+
+        return result;
+    }
+
+    private static void ScanDesktopFolder(
+        string folder, Dictionary<string, string> result, HashSet<string> scanned)
+    {
+        if (!Directory.Exists(folder)) return;
+
+        foreach (var file in Directory.GetFiles(folder, "*.v8i", SearchOption.TopDirectoryOnly))
+        {
+            // Нормализуем путь чтобы не парсить один файл дважды
+            // (например, если профили указывают на один и тот же Public Desktop)
+            var fullPath = Path.GetFullPath(file);
+            if (!scanned.Add(fullPath)) continue;
+
+            Logger.Info($"CacheModule: .v8i на рабочем столе: {fullPath}");
+            ParseV8iFile(fullPath, result);
         }
     }
 
