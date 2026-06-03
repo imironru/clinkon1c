@@ -129,7 +129,7 @@ public class CacheModule
             ibases.TryGetValue(uuid, out var baseName);
             bool isDead = string.IsNullOrEmpty(baseName);
             if (isDead)
-                baseName = $"[мёртвая папка: {uuid.Substring(0, 8)}]";
+                baseName = $"[неизвестная: {uuid.Substring(0, 8)}]";
 
             Logger.Info($"CacheModule:   UUID {uuid} ({pathType}): {(isDead ? "МЁРТВАЯ" : baseName)}");
 

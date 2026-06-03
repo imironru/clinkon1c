@@ -7,12 +7,13 @@ namespace Clinkon1C.UI;
 
 internal class NavItem
 {
-    public string Name       { get; init; } = "";
-    public long   SizeBytes  { get; init; }
-    public bool   IsDead     { get; init; }
-    public bool   IsExcluded { get; init; }
-    public bool   IsUp       { get; init; }  // строка [..]
-    public bool   CanEnter   { get; init; }  // можно провалиться внутрь
+    public string Name           { get; init; } = "";
+    public long   SizeBytes      { get; init; }
+    public bool   IsDead         { get; init; }
+    public bool   IsExcluded     { get; init; }
+    public bool   IsUp           { get; init; }  // строка [..]
+    public bool   CanEnter       { get; init; }  // можно провалиться внутрь
+    public bool   IsUnknownGroup { get; init; }  // группа [Неизвестные]
     // Физические пути для выделения/удаления
     public List<string> Paths { get; init; } = new List<string>();
     // Для drill-down
@@ -157,6 +158,7 @@ public class FarApp
 
         if (_cache.ViewMode == CacheViewMode.ByUser)
         {
+            // ByUser: на корне — пользователи, неизвестных нет (они внутри каждого юзера)
             var groups = _cache.Entries
                 .GroupBy(e => e.UserName, StringComparer.OrdinalIgnoreCase);
             var sorted = _cache.SortBy == SortMode.BySize
@@ -178,11 +180,13 @@ public class FarApp
         }
         else // ByBase
         {
-            var groups = _cache.Entries
+            // Известные базы
+            var knownGroups = _cache.Entries
+                .Where(e => !e.IsDead)
                 .GroupBy(e => e.BaseName, StringComparer.OrdinalIgnoreCase);
             var sorted = _cache.SortBy == SortMode.BySize
-                ? groups.OrderByDescending(g => g.Sum(e => e.SizeBytes))
-                : groups.OrderBy(g => g.Key);
+                ? knownGroups.OrderByDescending(g => g.Sum(e => e.SizeBytes))
+                : knownGroups.OrderBy(g => g.Key);
 
             foreach (var g in sorted)
             {
@@ -191,12 +195,14 @@ public class FarApp
                 {
                     Name      = g.Key,
                     SizeBytes = g.Sum(e => e.SizeBytes),
-                    IsDead    = g.All(e => e.IsDead),
                     CanEnter  = paths.Count > 1,
                     Paths     = paths,
                     BaseName  = g.Key
                 });
             }
+
+            // Группа неизвестных (все пользователи)
+            AddUnknownGroup(items, _cache.Entries.Where(e => e.IsDead).ToList(), null);
         }
 
         return new NavLevel
@@ -212,20 +218,42 @@ public class FarApp
             .Where(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        var sorted = _cache.SortBy == SortMode.BySize
-            ? entries.OrderByDescending(e => e.SizeBytes)
-            : entries.OrderBy(e => e.BaseName);
+        var known   = entries.Where(e => !e.IsDead && e.BaseName != "[Temp 1C]").ToList();
+        var unknown = entries.Where(e =>  e.IsDead).ToList();
+        var temp    = entries.Where(e => e.BaseName == "[Temp 1C]").ToList();
+
+        // Сортируем известные
+        var sortedKnown = _cache.SortBy == SortMode.BySize
+            ? known.OrderByDescending(e => e.SizeBytes)
+            : known.OrderBy(e => e.BaseName);
 
         var items = new List<NavItem> { UpItem() };
-        foreach (var e in sorted)
+
+        foreach (var e in sortedKnown)
         {
             var paths = e.Paths.Select(p => p.Path).ToList();
             items.Add(new NavItem
             {
                 Name      = e.BaseName,
                 SizeBytes = e.SizeBytes,
-                IsDead    = e.IsDead,
                 CanEnter  = e.Paths.Count > 1,
+                Paths     = paths,
+                UserName  = e.UserName,
+                BaseName  = e.BaseName
+            });
+        }
+
+        // Группа неизвестных — всегда в конце, перед Temp
+        AddUnknownGroup(items, unknown, user);
+
+        // Temp — всегда последний
+        foreach (var e in temp)
+        {
+            var paths = e.Paths.Select(p => p.Path).ToList();
+            items.Add(new NavItem
+            {
+                Name      = e.BaseName,
+                SizeBytes = e.SizeBytes,
                 Paths     = paths,
                 UserName  = e.UserName,
                 BaseName  = e.BaseName
@@ -237,6 +265,96 @@ public class FarApp
             Title       = $"{user}  →  {SafeDelete.FormatSize(entries.Sum(e => e.SizeBytes))}",
             Items       = items,
             ContextUser = user
+        };
+    }
+
+    /// <summary>Добавляет группу [Неизвестные — N] если список не пуст.</summary>
+    private static void AddUnknownGroup(
+        List<NavItem> items, List<CacheEntry> unknowns, string? user)
+    {
+        if (unknowns.Count == 0) return;
+        var paths     = unknowns.SelectMany(e => e.Paths.Select(p => p.Path)).ToList();
+        long totalSz  = unknowns.Sum(e => e.SizeBytes);
+        items.Add(new NavItem
+        {
+            Name           = $"[Неизвестные — {unknowns.Count}]",
+            SizeBytes      = totalSz,
+            CanEnter       = true,
+            IsUnknownGroup = true,
+            Paths          = paths,
+            UserName       = user
+        });
+    }
+
+    /// <summary>Уровень с неизвестными папками одного пользователя.</summary>
+    private NavLevel MakeUnknownLevel(string user)
+    {
+        var unknowns = _cache.Entries
+            .Where(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase)
+                     && e.IsDead)
+            .ToList();
+
+        var sorted = _cache.SortBy == SortMode.BySize
+            ? unknowns.OrderByDescending(e => e.SizeBytes)
+            : unknowns.OrderBy(e => e.Uuid);
+
+        var items = new List<NavItem> { UpItem() };
+        foreach (var e in sorted)
+        {
+            var shortId = e.Uuid.Length >= 8 ? e.Uuid.Substring(0, 8) + "…" : e.Uuid;
+            var paths   = e.Paths.Select(p => p.Path).ToList();
+            items.Add(new NavItem
+            {
+                Name      = shortId,
+                SizeBytes = e.SizeBytes,
+                IsDead    = true,
+                CanEnter  = e.Paths.Count > 1,
+                Paths     = paths,
+                UserName  = e.UserName,
+                BaseName  = e.BaseName    // нужен для MakePathLevel lookup
+            });
+        }
+
+        long total = unknowns.Sum(e => e.SizeBytes);
+        return new NavLevel
+        {
+            Title       = $"{user}  →  Неизвестные [{SafeDelete.FormatSize(total)}]",
+            Items       = items,
+            ContextUser = user
+        };
+    }
+
+    /// <summary>Уровень с неизвестными папками всех пользователей (для ByBase).</summary>
+    private NavLevel MakeUnknownFlatLevel()
+    {
+        var unknowns = _cache.Entries.Where(e => e.IsDead).ToList();
+
+        var sorted = _cache.SortBy == SortMode.BySize
+            ? unknowns.OrderByDescending(e => e.SizeBytes)
+            : unknowns.OrderBy(e => e.Uuid);
+
+        var items = new List<NavItem> { UpItem() };
+        foreach (var e in sorted)
+        {
+            var shortId = e.Uuid.Length >= 8 ? e.Uuid.Substring(0, 8) + "…" : e.Uuid;
+            var paths   = e.Paths.Select(p => p.Path).ToList();
+            items.Add(new NavItem
+            {
+                Name      = $"{shortId}  ({e.UserName})",
+                SizeBytes = e.SizeBytes,
+                IsDead    = true,
+                CanEnter  = e.Paths.Count > 1,
+                Paths     = paths,
+                UserName  = e.UserName,
+                BaseName  = e.BaseName
+            });
+        }
+
+        long total = unknowns.Sum(e => e.SizeBytes);
+        return new NavLevel
+        {
+            Title = $"Неизвестные — все пользователи [{SafeDelete.FormatSize(total)}]",
+            Items = items
         };
     }
 
@@ -312,30 +430,39 @@ public class FarApp
     // ── Навигация ─────────────────────────────────────────────────────────────
     private void Enter()
     {
-        var lvl = _nav.Peek();
+        var lvl  = _nav.Peek();
         var item = lvl.Items[lvl.Cursor];
         if (item.IsUp) { GoUp(); return; }
         if (!item.CanEnter) return;
 
+        // Группа неизвестных → уровень с UUID-папками
+        if (item.IsUnknownGroup)
+        {
+            if (item.UserName != null)
+                _nav.Push(MakeUnknownLevel(item.UserName));
+            else
+                _nav.Push(MakeUnknownFlatLevel());
+            return;
+        }
+
+        // Корневой уровень → уровень пользователя или базы
         if (_nav.Count == 1)
         {
-            // root → user level или base level
             if (_cache.ViewMode == CacheViewMode.ByUser && item.UserName != null)
                 _nav.Push(MakeUserLevel(item.UserName));
             else if (_cache.ViewMode == CacheViewMode.ByBase && item.BaseName != null)
                 _nav.Push(MakeBaseFlatLevel(item.BaseName));
+            return;
         }
-        else
+
+        // Уровень базы с несколькими путями → уровень путей
+        if (item.UserName != null && item.BaseName != null)
         {
-            // user level → path level (если несколько путей)
-            if (item.UserName != null && item.BaseName != null)
-            {
-                var entry = _cache.Entries.FirstOrDefault(e =>
-                    string.Equals(e.UserName, item.UserName, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(e.BaseName, item.BaseName, StringComparison.OrdinalIgnoreCase));
-                if (entry != null && entry.Paths.Count > 1)
-                    _nav.Push(MakePathLevel(entry));
-            }
+            var entry = _cache.Entries.FirstOrDefault(e =>
+                string.Equals(e.UserName, item.UserName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(e.BaseName, item.BaseName, StringComparison.OrdinalIgnoreCase));
+            if (entry != null && entry.Paths.Count > 1)
+                _nav.Push(MakePathLevel(entry));
         }
     }
 
@@ -615,6 +742,10 @@ public class FarApp
         else if (!item.IsUp && item.Paths.Count > 0 && item.Paths.All(p => _sel.Contains(p)))
         {
             fg = R.SelFg; bg = R.PanelBg;
+        }
+        else if (item.IsUnknownGroup)
+        {
+            fg = ConsoleColor.DarkCyan; bg = R.PanelBg;  // заметно, но не кричаще
         }
         else if (item.IsDead || item.IsExcluded)
         {
