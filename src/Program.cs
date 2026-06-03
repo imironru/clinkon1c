@@ -4,6 +4,7 @@ using System.Security.Principal;
 using System.Text.Json.Serialization;
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Templates;
 using Clinkon1C.UI;
 
 namespace Clinkon1C;
@@ -158,8 +159,9 @@ class Program
         Logger.Info($"Clinkon1C v{VERSION} запуск TUI");
         try
         {
-            var cache = new CacheModule();
-            new FarApp(cache, updateNotice).Run();
+            var cache     = new CacheModule();
+            var templates = new TemplatesModule();
+            new FarApp(cache, templates, updateNotice).Run();
         }
         finally
         {

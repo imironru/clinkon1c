@@ -1,9 +1,21 @@
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Templates;
 
 namespace Clinkon1C.UI;
 
 // ── Модель навигации ─────────────────────────────────────────────────────────
+
+internal enum NavLevelKind
+{
+    Home,            // главный экран: Кэш / Шаблоны
+    CacheRoot,       // список пользователей или баз
+    CacheUser,       // базы внутри пользователя
+    CacheUnknown,    // неизвестные папки
+    CachePaths,      // Local/Roaming пути одной базы
+    TemplatesRoot,   // список пользователей с шаблонами
+    TemplatesUser    // шаблоны конкретного пользователя
+}
 
 internal class NavItem
 {
@@ -14,6 +26,7 @@ internal class NavItem
     public bool   IsUp           { get; init; }  // строка [..]
     public bool   CanEnter       { get; init; }  // можно провалиться внутрь
     public bool   IsUnknownGroup { get; init; }  // группа [Неизвестные]
+    public string? ModuleId      { get; init; }  // "cache" / "templates" (для Home уровня)
     // Физические пути для выделения/удаления
     public List<string> Paths { get; init; } = new List<string>();
     // Для drill-down
@@ -24,6 +37,7 @@ internal class NavItem
 
 internal class NavLevel
 {
+    public NavLevelKind Kind  { get; init; } = NavLevelKind.Home;
     public string Title { get; init; } = "";
     public List<NavItem> Items { get; init; } = new List<NavItem>();
     public int Cursor { get; set; }
@@ -38,8 +52,9 @@ public class FarApp
 {
     private const string RepoUrl = "github.com/iMironRU/Clinkon1C";
 
-    private readonly CacheModule _cache;
-    private readonly string?     _updateNotice;
+    private readonly CacheModule     _cache;
+    private readonly TemplatesModule _templates;
+    private readonly string?         _updateNotice;
     private readonly Stack<NavLevel> _nav = new Stack<NavLevel>();
     private readonly HashSet<string> _sel =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -63,9 +78,10 @@ public class FarApp
     private static int NameW      => InnerW - SizeCW; // ширина колонки имени
 
     // ── Запуск ───────────────────────────────────────────────────────────────
-    public FarApp(CacheModule cache, string? updateNotice = null)
+    public FarApp(CacheModule cache, TemplatesModule templates, string? updateNotice = null)
     {
         _cache        = cache;
+        _templates    = templates;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -108,15 +124,18 @@ public class FarApp
         _sel.Clear();
 
         string status = "Инициализация...";
-        bool done = false;
-        Exception? err = null;
-        int spin = 0;
-        var spinCh = new[] { '|', '/', '-', '\\' };
+        bool   done   = false;
+        int    spin   = 0;
+        var    spinCh = new[] { '|', '/', '-', '\\' };
 
         var t = new Thread(() =>
         {
-            try   { _cache.Refresh(msg => { status = msg; }); }
-            catch (Exception ex) { err = ex; }
+            try
+            {
+                _cache.Refresh(msg     => { status = msg; });
+                _templates.Refresh(msg => { status = "Шаблоны: " + msg; });
+            }
+            catch (Exception ex) { Logger.Error($"Сканирование: {ex.Message}"); }
             finally { done = true; }
         });
         t.IsBackground = true;
@@ -129,11 +148,8 @@ public class FarApp
         }
         t.Join();
 
-        if (err != null)
-            Logger.Error($"Ошибка сканирования: {err.Message}");
-
-        R.Invalidate();          // диалог сканирования писал напрямую — перерисуем всё
-        _nav.Push(MakeRootLevel());
+        R.Invalidate();
+        _nav.Push(MakeHomeLevel());
     }
 
     private static void DrawScanDlg(string status, char sp)
@@ -152,7 +168,44 @@ public class FarApp
     }
 
     // ── Построение уровней ───────────────────────────────────────────────────
-    private NavLevel MakeRootLevel()
+    // ── Главный экран ────────────────────────────────────────────────────────
+
+    private NavLevel MakeHomeLevel()
+    {
+        long total = _cache.TotalSize + _templates.TotalSize;
+
+        var cachePaths = _cache.Entries
+            .SelectMany(e => e.Paths.Select(p => p.Path)).ToList();
+        var tmplPaths = _templates.Entries
+            .Select(e => e.Path).ToList();
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.Home,
+            Title = $"Clinkon1C  [{SafeDelete.FormatSize(total)}]",
+            Items = new List<NavItem>
+            {
+                new NavItem
+                {
+                    Name     = "Кэш",
+                    SizeBytes = _cache.TotalSize,
+                    CanEnter = true,
+                    ModuleId = "cache",
+                    Paths    = cachePaths
+                },
+                new NavItem
+                {
+                    Name      = "Шаблоны",
+                    SizeBytes = _templates.TotalSize,
+                    CanEnter  = _templates.Entries.Count > 0,
+                    ModuleId  = "templates",
+                    Paths     = tmplPaths
+                }
+            }
+        };
+    }
+
+    private NavLevel MakeCacheLevel()
     {
         var items = new List<NavItem> { UpItem() };
 
@@ -207,6 +260,7 @@ public class FarApp
 
         return new NavLevel
         {
+            Kind  = NavLevelKind.CacheRoot,
             Title = $"Кэш [{SafeDelete.FormatSize(_cache.TotalSize)}]",
             Items = items
         };
@@ -262,6 +316,7 @@ public class FarApp
 
         return new NavLevel
         {
+            Kind        = NavLevelKind.CacheUser,
             Title       = $"{user}  →  {SafeDelete.FormatSize(entries.Sum(e => e.SizeBytes))}",
             Items       = items,
             ContextUser = user
@@ -318,6 +373,7 @@ public class FarApp
         long total = unknowns.Sum(e => e.SizeBytes);
         return new NavLevel
         {
+            Kind        = NavLevelKind.CacheUnknown,
             Title       = $"{user}  →  Неизвестные [{SafeDelete.FormatSize(total)}]",
             Items       = items,
             ContextUser = user
@@ -353,6 +409,7 @@ public class FarApp
         long total = unknowns.Sum(e => e.SizeBytes);
         return new NavLevel
         {
+            Kind  = NavLevelKind.CacheUnknown,
             Title = $"Неизвестные — все пользователи [{SafeDelete.FormatSize(total)}]",
             Items = items
         };
@@ -377,6 +434,7 @@ public class FarApp
 
         return new NavLevel
         {
+            Kind        = NavLevelKind.CachePaths,
             Title       = $"{entry.UserName}  →  {entry.BaseName}" +
                           $"  [{SafeDelete.FormatSize(entry.SizeBytes)}]",
             Items       = items,
@@ -417,6 +475,72 @@ public class FarApp
         };
     }
 
+    // ── Шаблоны ──────────────────────────────────────────────────────────────
+
+    private NavLevel MakeTemplatesLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        var groups = _templates.Entries
+            .GroupBy(e => e.UserName, StringComparer.OrdinalIgnoreCase);
+        var sorted = _cache.SortBy == SortMode.BySize
+            ? groups.OrderByDescending(g => g.Sum(e => e.SizeBytes))
+            : groups.OrderBy(g => g.Key);
+
+        foreach (var g in sorted)
+        {
+            long sz    = g.Sum(e => e.SizeBytes);
+            var  paths = g.Select(e => e.Path).ToList();
+            items.Add(new NavItem
+            {
+                Name      = g.Key,
+                SizeBytes = sz,
+                CanEnter  = true,
+                Paths     = paths,
+                UserName  = g.Key
+            });
+        }
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.TemplatesRoot,
+            Title = $"Шаблоны [{SafeDelete.FormatSize(_templates.TotalSize)}]",
+            Items = items
+        };
+    }
+
+    private NavLevel MakeTemplatesUserLevel(string user)
+    {
+        var entries = _templates.Entries
+            .Where(e => string.Equals(e.UserName, user, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var sorted = _cache.SortBy == SortMode.BySize
+            ? entries.OrderByDescending(e => e.SizeBytes)
+            : entries.OrderBy(e => e.Name);
+
+        var items = new List<NavItem> { UpItem() };
+        foreach (var e in sorted)
+        {
+            items.Add(new NavItem
+            {
+                Name      = e.Name,
+                SizeBytes = e.SizeBytes,
+                Paths     = new List<string> { e.Path },
+                UserName  = e.UserName
+            });
+        }
+
+        long total = entries.Sum(e => e.SizeBytes);
+        return new NavLevel
+        {
+            Kind        = NavLevelKind.TemplatesUser,
+            Title       = $"{user}  →  Шаблоны [{SafeDelete.FormatSize(total)}]",
+            Items       = items,
+            ContextUser = user
+        };
+    }
+
     private static string ShortenPath(string path)
     {
         const int max = 38;
@@ -435,40 +559,90 @@ public class FarApp
         if (item.IsUp) { GoUp(); return; }
         if (!item.CanEnter) return;
 
-        // Группа неизвестных → уровень с UUID-папками
-        if (item.IsUnknownGroup)
+        switch (lvl.Kind)
         {
-            if (item.UserName != null)
-                _nav.Push(MakeUnknownLevel(item.UserName));
-            else
-                _nav.Push(MakeUnknownFlatLevel());
-            return;
-        }
+            case NavLevelKind.Home:
+                if (item.ModuleId == "cache")
+                    _nav.Push(MakeCacheLevel());
+                else if (item.ModuleId == "templates")
+                    _nav.Push(MakeTemplatesLevel());
+                break;
 
-        // Корневой уровень → уровень пользователя или базы
-        if (_nav.Count == 1)
-        {
-            if (_cache.ViewMode == CacheViewMode.ByUser && item.UserName != null)
-                _nav.Push(MakeUserLevel(item.UserName));
-            else if (_cache.ViewMode == CacheViewMode.ByBase && item.BaseName != null)
-                _nav.Push(MakeBaseFlatLevel(item.BaseName));
-            return;
-        }
+            case NavLevelKind.CacheRoot:
+                if (item.IsUnknownGroup)
+                    _nav.Push(MakeUnknownFlatLevel());
+                else if (_cache.ViewMode == CacheViewMode.ByUser && item.UserName != null)
+                    _nav.Push(MakeUserLevel(item.UserName));
+                else if (_cache.ViewMode == CacheViewMode.ByBase && item.BaseName != null)
+                    _nav.Push(MakeBaseFlatLevel(item.BaseName));
+                break;
 
-        // Уровень базы с несколькими путями → уровень путей
-        if (item.UserName != null && item.BaseName != null)
-        {
-            var entry = _cache.Entries.FirstOrDefault(e =>
-                string.Equals(e.UserName, item.UserName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(e.BaseName, item.BaseName, StringComparison.OrdinalIgnoreCase));
-            if (entry != null && entry.Paths.Count > 1)
-                _nav.Push(MakePathLevel(entry));
+            case NavLevelKind.CacheUser:
+                if (item.IsUnknownGroup && item.UserName != null)
+                    _nav.Push(MakeUnknownLevel(item.UserName));
+                else if (item.UserName != null && item.BaseName != null)
+                {
+                    var entry = _cache.Entries.FirstOrDefault(e =>
+                        string.Equals(e.UserName, item.UserName, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(e.BaseName, item.BaseName, StringComparison.OrdinalIgnoreCase));
+                    if (entry != null && entry.Paths.Count > 1)
+                        _nav.Push(MakePathLevel(entry));
+                }
+                break;
+
+            case NavLevelKind.CacheUnknown:
+                if (item.UserName != null && item.BaseName != null)
+                {
+                    var entry = _cache.Entries.FirstOrDefault(e =>
+                        string.Equals(e.UserName, item.UserName, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(e.BaseName, item.BaseName, StringComparison.OrdinalIgnoreCase));
+                    if (entry != null && entry.Paths.Count > 1)
+                        _nav.Push(MakePathLevel(entry));
+                }
+                break;
+
+            case NavLevelKind.TemplatesRoot:
+                if (item.UserName != null)
+                    _nav.Push(MakeTemplatesUserLevel(item.UserName));
+                break;
         }
     }
 
     private void GoUp()
     {
         if (_nav.Count > 1) _nav.Pop();
+    }
+
+    /// <summary>Пересобирает текущий уровень (после смены сортировки или вида).</summary>
+    private void RebuildCurrentLevel()
+    {
+        if (_nav.Count == 0) return;
+        var cur = _nav.Peek();
+        NavLevel? rebuilt = null;
+
+        switch (cur.Kind)
+        {
+            case NavLevelKind.Home:          rebuilt = MakeHomeLevel();  break;
+            case NavLevelKind.CacheRoot:     rebuilt = MakeCacheLevel(); break;
+            case NavLevelKind.CacheUser:
+                if (cur.ContextUser != null) rebuilt = MakeUserLevel(cur.ContextUser);
+                break;
+            case NavLevelKind.CacheUnknown:
+                if (cur.ContextUser != null) rebuilt = MakeUnknownLevel(cur.ContextUser);
+                else                          rebuilt = MakeUnknownFlatLevel();
+                break;
+            case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
+            case NavLevelKind.TemplatesUser:
+                if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
+                break;
+        }
+
+        if (rebuilt == null) return;
+        // Сохраняем позицию курсора
+        rebuilt.Cursor    = Math.Min(cur.Cursor,    Math.Max(0, rebuilt.Items.Count - 1));
+        rebuilt.ScrollTop = Math.Min(cur.ScrollTop, Math.Max(0, rebuilt.Items.Count - 1));
+        _nav.Pop();
+        _nav.Push(rebuilt);
     }
 
     private void ToggleSel()
@@ -555,11 +729,14 @@ public class FarApp
                 break;
 
             case ConsoleKey.Tab:
-                _cache.ViewMode = _cache.ViewMode == CacheViewMode.ByUser
-                    ? CacheViewMode.ByBase
-                    : CacheViewMode.ByUser;
-                _nav.Clear();
-                _nav.Push(MakeRootLevel());
+                // Tab переключает вид только в контексте кэша
+                var tabKind = _nav.Peek().Kind;
+                if (tabKind == NavLevelKind.CacheRoot || tabKind == NavLevelKind.CacheUser)
+                {
+                    _cache.ViewMode = _cache.ViewMode == CacheViewMode.ByUser
+                        ? CacheViewMode.ByBase : CacheViewMode.ByUser;
+                    RebuildCurrentLevel();
+                }
                 break;
 
             default:
@@ -568,8 +745,7 @@ public class FarApp
                 {
                     _cache.SortBy = _cache.SortBy == SortMode.ByName
                         ? SortMode.BySize : SortMode.ByName;
-                    _nav.Clear();
-                    _nav.Push(MakeRootLevel());
+                    RebuildCurrentLevel();
                 }
                 break;
         }
@@ -809,10 +985,14 @@ public class FarApp
 
     private void DrawKeyBar()
     {
-        var sort = _cache.SortBy == SortMode.BySize ? "Размер▼" : "Имя▲";
-        var view = _cache.ViewMode == CacheViewMode.ByUser ? "По базе" : "По польз.";
-        var bar = $"[Пробел] Выделить  [S] {sort}  [Del] Удалить  [Shift+Del] Dry Run" +
-                  $"  [Tab] {view}  [F5] Обновить  [F1] ?  [F10] Выход  v{Program.VERSION}";
+        var kind  = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
+        var sort  = _cache.SortBy == SortMode.BySize ? "Размер▼" : "Имя▲";
+        var view  = _cache.ViewMode == CacheViewMode.ByUser ? "По базе" : "По польз.";
+        bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
+
+        var bar = $"[Пробел] Выделить  [S] {sort}  [Del] Удалить  [Shift+Del] Dry Run"
+                + (showTab ? $"  [Tab] {view}" : "")
+                + $"  [F5] Обновить  [F1] ?  [F10] Выход  v{Program.VERSION}";
         R.FillRow(KeyRow, R.HdrFg, R.HdrBg);
         R.Put(0, KeyRow, bar, R.HdrFg, R.HdrBg);
     }
