@@ -15,6 +15,16 @@ class Program
     public const string VERSION = "1.0.0";
     private const string GithubApiUrl = "https://api.github.com/repos/iMironRU/Clinkon1C/releases/latest";
 
+    /// <summary>Версия с номером сборки: "1.0.0 b26" или просто "1.0.0" если нет build number.</summary>
+    public static string FullVersion
+    {
+        get
+        {
+            var ver = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+            return (ver != null && ver.Revision > 0) ? $"{VERSION} b{ver.Revision}" : VERSION;
+        }
+    }
+
 #if NETFRAMEWORK
     static void CheckDotNetFramework()
     {
@@ -82,16 +92,25 @@ class Program
         // 2. После прав — предупреждение в FAR-стиле (пользователь жмёт только один раз)
         if (!ShowWarningDialog()) return;
 
-        // Проверка обновлений (фоновая)
+        // 3. Проверка обновлений — интерактивная, предлагаем обновиться
         string? updateNotice = null;
         try
         {
-            updateNotice = CheckForUpdate();
+            var upd = CheckForUpdate();
+            if (upd != null)
+            {
+                updateNotice = $"v{upd.Version}";
+                if (ShowUpdateDialog(upd))
+                {
+                    SelfUpdate(upd);
+                    return; // SelfUpdate запускает новый процесс и вызывает Environment.Exit(0)
+                }
+            }
         }
-        catch { }
+        catch { /* сетевые ошибки не останавливают запуск */ }
 
         // Запуск приложения
-        Logger.Info($"Clinkon1C v{VERSION} запуск TUI");
+        Logger.Info($"Clinkon1C v{VERSION} ({FullVersion}) запуск TUI");
         try
         {
             var cache     = new CacheModule();
@@ -233,22 +252,157 @@ class Program
         catch { return false; }
     }
 
-    private static string? CheckForUpdate()
+    // ── Обновление ────────────────────────────────────────────────────────────
+
+    private record UpdateInfo(string Version, string DownloadUrl);
+
+    private static UpdateInfo? CheckForUpdate()
     {
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("User-Agent", $"Clinkon1C/{VERSION}");
-        client.Timeout = TimeSpan.FromSeconds(5);
+        client.Timeout = TimeSpan.FromSeconds(6);
 
-        var response = client.GetFromJsonAsync<GithubRelease>(GithubApiUrl)
+        var release = client.GetFromJsonAsync<GithubRelease>(GithubApiUrl)
             .GetAwaiter().GetResult();
+        if (release?.TagName == null) return null;
 
-        if (response?.TagName == null) return null;
+        var latest = release.TagName.TrimStart('v');
+        if (!IsNewerVersion(VERSION, latest)) return null;
 
-        var latestVer = response.TagName.TrimStart('v');
-        if (string.Compare(latestVer, VERSION, StringComparison.Ordinal) > 0)
-            return $"v{latestVer}";
+        // Ищем нужный артефакт для текущей платформы
+#if NETFRAMEWORK
+        const string keyword = "legacy";
+#else
+        const string keyword = "x64";
+#endif
+        var asset = release.Assets?.FirstOrDefault(a =>
+            a.Name?.Contains(keyword) == true && a.Name.EndsWith(".exe"));
 
-        return null;
+        return new UpdateInfo(latest, asset?.BrowserDownloadUrl ?? "");
+    }
+
+    private static bool IsNewerVersion(string current, string latest)
+    {
+        var split = (string s) => s.Split('.').Select(p => int.TryParse(p, out int n) ? n : 0).ToArray();
+        var cur = split(current);
+        var lat = split(latest);
+        int len = Math.Max(cur.Length, lat.Length);
+        for (int i = 0; i < len; i++)
+        {
+            int a = i < cur.Length ? cur[i] : 0;
+            int b = i < lat.Length ? lat[i] : 0;
+            if (b > a) return true;
+            if (b < a) return false;
+        }
+        return false;
+    }
+
+    private static bool ShowUpdateDialog(UpdateInfo upd)
+    {
+        Console.CursorVisible = false;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Clear();
+
+        int W = Console.WindowWidth;
+        int H = Console.WindowHeight;
+        int w = Math.Min(W - 4, 66);
+        int h = 10;
+        int x = (W - w) / 2;
+        int y = (H - h) / 2;
+
+        void At(int cx, int cy) { try { Console.SetCursorPosition(cx, cy); } catch { } }
+
+        At(x, y);
+        var tt = "══ Clinkon1C — Доступно обновление ";
+        Console.Write("╔" + tt + new string('═', w - 2 - tt.Length) + "╗");
+        for (int i = 1; i < h - 1; i++) { At(x, y + i); Console.Write("║" + new string(' ', w - 2) + "║"); }
+        At(x, y + h - 1);
+        Console.Write("╚" + new string('═', w - 2) + "╝");
+
+        At(x + 2, y + 2);
+        Console.Write($"  Текущая версия: {FullVersion}");
+        At(x + 2, y + 3);
+        Console.Write($"  Новая версия:   v{upd.Version}");
+        At(x + 2, y + 5);
+        Console.Write("  Скачать и заменить текущий файл автоматически?");
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        var btns = "[ Y ]  Да, обновить сейчас      [ N ]  Позже";
+        At(x + (w - btns.Length) / 2, y + h - 2);
+        Console.Write(btns);
+
+        while (true)
+        {
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Y || k.KeyChar == 'y' || k.KeyChar == 'Y') return true;
+            if (k.Key == ConsoleKey.N || k.KeyChar == 'n' || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
+        }
+    }
+
+    private static void SelfUpdate(UpdateInfo upd)
+    {
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Clear();
+        Console.SetCursorPosition(2, 2);
+        Console.Write($"Загрузка v{upd.Version}...");
+
+        try
+        {
+            if (string.IsNullOrEmpty(upd.DownloadUrl))
+            {
+                // Нет прямой ссылки — открываем страницу Releases в браузере
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName        = "https://github.com/iMironRU/Clinkon1C/releases/latest",
+                    UseShellExecute = true
+                });
+                return;
+            }
+
+            var currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName;
+            var tempFile   = Path.Combine(Path.GetTempPath(), "Clinkon1C_update.exe");
+
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.Add("User-Agent", $"Clinkon1C/{VERSION}");
+            client.Timeout = TimeSpan.FromMinutes(5);
+            var bytes = client.GetByteArrayAsync(upd.DownloadUrl).GetAwaiter().GetResult();
+            File.WriteAllBytes(tempFile, bytes);
+
+            Console.SetCursorPosition(2, 3);
+            Console.Write("Применение обновления...");
+
+            // Bat-скрипт: ждёт выхода текущего процесса, копирует новый файл, запускает
+            var scriptPath = Path.Combine(Path.GetTempPath(), "clinkon1c_upd.bat");
+            File.WriteAllText(scriptPath,
+                $"@echo off\r\n" +
+                $"timeout /t 2 /nobreak >nul\r\n" +
+                $"copy /y \"{tempFile}\" \"{currentExe}\" >nul\r\n" +
+                $"del \"{tempFile}\" >nul\r\n" +
+                $"start \"\" \"{currentExe}\"\r\n" +
+                $"del \"%~f0\"\r\n",
+                System.Text.Encoding.ASCII);
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = scriptPath,
+                UseShellExecute = true,
+                WindowStyle     = System.Diagnostics.ProcessWindowStyle.Hidden
+            });
+
+            Environment.Exit(0);
+        }
+        catch (Exception ex)
+        {
+            Console.SetCursorPosition(2, 4);
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Write($"Ошибка: {ex.Message}");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.SetCursorPosition(2, 5);
+            Console.Write("Нажмите любую клавишу...");
+            Console.ReadKey(true);
+        }
     }
 
     private class GithubRelease
@@ -256,7 +410,16 @@ class Program
         [JsonPropertyName("tag_name")]
         public string? TagName { get; set; }
 
-        [JsonPropertyName("body")]
-        public string? Body { get; set; }
+        [JsonPropertyName("assets")]
+        public List<GithubAsset>? Assets { get; set; }
+    }
+
+    private class GithubAsset
+    {
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("browser_download_url")]
+        public string? BrowserDownloadUrl { get; set; }
     }
 }

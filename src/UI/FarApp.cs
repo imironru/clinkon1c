@@ -166,6 +166,68 @@ public class FarApp
         _nav.Push(MakeHomeLevel());
     }
 
+    /// <summary>
+    /// Пересканирует только кэш и восстанавливает навигацию на прежнем уровне.
+    /// Вызывается после удаления — чтобы не выбрасывало на главный экран.
+    /// </summary>
+    private void RescanCacheAndRestore()
+    {
+        // Запоминаем текущую позицию
+        var levels        = _nav.ToArray().Reverse().ToList(); // [home, cache, user, ...]
+        string? savedUser = null;
+        NavLevelKind targetKind = NavLevelKind.CacheRoot;
+
+        foreach (var lvl in levels)
+        {
+            if (lvl.Kind == NavLevelKind.CacheUser || lvl.Kind == NavLevelKind.CacheUnknown)
+            {
+                targetKind = lvl.Kind;
+                savedUser  = lvl.ContextUser;
+            }
+            else if (lvl.Kind == NavLevelKind.CacheRoot)
+            {
+                targetKind = NavLevelKind.CacheRoot;
+            }
+        }
+
+        // Пересканируем только кэш
+        string status = "Обновление кэша...";
+        bool   done   = false;
+        int    spin   = 0;
+        var    spinCh = new[] { '|', '/', '-', '\\' };
+
+        var t = new Thread(() =>
+        {
+            try   { _cache.Refresh(msg => { status = msg; }); }
+            catch (Exception ex) { Logger.Error($"Обновление: {ex.Message}"); }
+            finally { done = true; }
+        });
+        t.IsBackground = true;
+        t.Start();
+        while (!done)
+        {
+            DrawScanDlg(status, spinCh[spin++ % spinCh.Length]);
+            Thread.Sleep(100);
+        }
+        t.Join();
+
+        R.Invalidate();
+
+        // Восстанавливаем навигацию
+        _nav.Clear();
+        _nav.Push(MakeHomeLevel());
+        _nav.Push(MakeCacheLevel());
+
+        if (savedUser != null &&
+            (targetKind == NavLevelKind.CacheUser || targetKind == NavLevelKind.CacheUnknown))
+        {
+            bool userHasEntries = _cache.Entries.Any(e =>
+                string.Equals(e.UserName, savedUser, StringComparison.OrdinalIgnoreCase));
+            if (userHasEntries)
+                _nav.Push(MakeUserLevel(savedUser));
+        }
+    }
+
     private static void DrawScanDlg(string status, char sp)
     {
         int dw = Math.Min(58, R.W - 4);
@@ -848,12 +910,13 @@ public class FarApp
                 _markedBases.Clear();
                 break;
 
-            case ConsoleKey.Delete when (k.Modifiers & ConsoleModifiers.Shift) != 0:
-                DoDryRun();
+            case ConsoleKey.F8:
+                DoDelete();
                 break;
 
-            case ConsoleKey.Delete:
-                DoDelete();
+            // Dry Run — работает, но не показываем в подсказке (скрытая функция)
+            case ConsoleKey.Delete when (k.Modifiers & ConsoleModifiers.Shift) != 0:
+                DoDryRun();
                 break;
 
             case ConsoleKey.F5:
@@ -955,13 +1018,40 @@ public class FarApp
         }
 
         Logger.Info($"Удаление: {paths.Count} путей");
-        var res = SafeDelete.Delete(paths,
-            RegistryHelper.BackupEnabled, RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null,
-            SafeDelete.CacheProtectedMasks);
-        Logger.Info($"Итог: {res.DeletedDirs} папок, {res.DeletedFiles} файлов, " +
-                    $"{SafeDelete.FormatSize(res.FreedBytes)}, ошибок: {res.Errors.Count}");
 
-        Rescan();
+        // Удаляем в фоне — показываем спиннер (иначе экран зависает)
+        DeleteResult? res = null;
+        bool delDone = false;
+        var delThread = new Thread(() =>
+        {
+            try
+            {
+                res = SafeDelete.Delete(paths,
+                    RegistryHelper.BackupEnabled,
+                    RegistryHelper.BackupEnabled ? RegistryHelper.BackupPath : null,
+                    SafeDelete.CacheProtectedMasks);
+            }
+            catch (Exception ex) { Logger.Error($"Ошибка удаления: {ex.Message}"); }
+            finally { delDone = true; }
+        });
+        delThread.IsBackground = true;
+        delThread.Start();
+
+        int spin = 0;
+        var spinCh = new[] { '|', '/', '-', '\\' };
+        while (!delDone)
+        {
+            DrawScanDlg($"Удаление {paths.Count} объект(а)...", spinCh[spin++ % spinCh.Length]);
+            Thread.Sleep(80);
+        }
+        delThread.Join();
+
+        if (res != null)
+            Logger.Info($"Итог: {res.DeletedDirs} папок, {res.DeletedFiles} файлов, " +
+                        $"{SafeDelete.FormatSize(res.FreedBytes)}, ошибок: {res.Errors.Count}");
+
+        _sel.Clear();
+        RescanCacheAndRestore(); // остаёмся в том же месте навигации
     }
 
     // ── Действия с базами ─────────────────────────────────────────────────────
@@ -1100,7 +1190,7 @@ public class FarApp
     private void DrawHeader()
     {
         R.FillRow(0, R.HdrFg, R.HdrBg);
-        R.Put(0, 0, $" Clinkon1C v{Program.VERSION}  │  {RepoUrl}", R.HdrFg, R.HdrBg);
+        R.Put(0, 0, $" Clinkon1C {Program.FullVersion}  │  {RepoUrl}", R.HdrFg, R.HdrBg);
         if (!string.IsNullOrEmpty(_updateNotice))
         {
             var n = $" ★ {_updateNotice} ";
@@ -1246,11 +1336,12 @@ public class FarApp
         bool isBases = kind == NavLevelKind.BasesRoot;
         bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
 
+        var ver = Program.FullVersion;
         var bar = isBases
-            ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  v{Program.VERSION}"
-            : $"[Пробел] Выделить  [S] {sort}  [Del] Удалить  [Shift+Del] Dry Run"
+            ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
+            : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
-              + $"  [F5] Обновить  [F1] ?  [F10] Выход  v{Program.VERSION}";
+              + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";
         R.FillRow(KeyRow, R.HdrFg, R.HdrBg);
         R.Put(0, KeyRow, bar, R.HdrFg, R.HdrBg);
     }
