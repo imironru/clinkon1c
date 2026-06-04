@@ -1,3 +1,4 @@
+using System.Linq;
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
@@ -172,21 +173,19 @@ public class FarApp
     /// </summary>
     private void RescanCacheAndRestore()
     {
-        // Запоминаем текущую позицию
-        var levels        = _nav.ToArray().Reverse().ToList(); // [home, cache, user, ...]
+        // Запоминаем контекст (Stack перечисляется сверху вниз — самый глубокий уровень первым)
         string? savedUser = null;
         NavLevelKind targetKind = NavLevelKind.CacheRoot;
 
-        foreach (var lvl in levels)
+        foreach (var lvl in _nav)   // Stack<T> IEnumerable — top first
         {
             if (lvl.Kind == NavLevelKind.CacheUser || lvl.Kind == NavLevelKind.CacheUnknown)
             {
-                targetKind = lvl.Kind;
-                savedUser  = lvl.ContextUser;
-            }
-            else if (lvl.Kind == NavLevelKind.CacheRoot)
-            {
-                targetKind = NavLevelKind.CacheRoot;
+                if (savedUser == null) // берём самый глубокий cache-user уровень
+                {
+                    targetKind = lvl.Kind;
+                    savedUser  = lvl.ContextUser;
+                }
             }
         }
 
@@ -1120,8 +1119,9 @@ public class FarApp
             fileName = fileName.Replace(c.ToString(), "");
         if (string.IsNullOrWhiteSpace(fileName)) fileName = "bases";
 
-        var desktop  = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var filePath = Path.Combine(desktop, fileName.Trim() + ".v8i");
+        var desktop   = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var safeName  = (fileName ?? "bases").Trim();
+        var filePath  = Path.Combine(desktop, safeName + ".v8i");
 
         _bases.ExportToV8i(entries, filePath);
 

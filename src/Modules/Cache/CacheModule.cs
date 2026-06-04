@@ -314,12 +314,12 @@ public class CacheModule
     {
         if (secName == null) return;
 
-        if (!string.IsNullOrEmpty(secCache) && !result.ContainsKey(secCache))
-            result[secCache] = secName;
+        if (!string.IsNullOrEmpty(secCache) && !result.ContainsKey(secCache!))
+            result[secCache!] = secName;
 
         // ID= как запасной ключ — если UUID совпадает с именем папки кэша
-        if (!string.IsNullOrEmpty(secId) && !result.ContainsKey(secId))
-            result[secId] = secName;
+        if (!string.IsNullOrEmpty(secId) && !result.ContainsKey(secId!))
+            result[secId!] = secName;
     }
 
 }
