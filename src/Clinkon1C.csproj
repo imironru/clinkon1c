@@ -11,6 +11,7 @@
     <Version>1.0.0</Version>
     <Company>Clinkon1C</Company>
     <Description>Утилита администратора для очистки артефактов 1С</Description>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <Copyright>Copyright © 2025</Copyright>
   </PropertyGroup>
 
