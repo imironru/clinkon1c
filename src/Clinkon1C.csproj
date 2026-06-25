@@ -32,6 +32,11 @@
     <PackageReference Include="System.Diagnostics.EventLog" Version="8.*" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\ring.car" LogicalName="ring.car" />
+    <EmbeddedResource Include="Resources\license-tools.car" LogicalName="license-tools.car" />
+  </ItemGroup>
+
   <!-- Пакеты только для net48 (в net8 встроены) -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <PackageReference Include="System.Text.Json" Version="8.*" />

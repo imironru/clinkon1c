@@ -1227,25 +1227,16 @@ public class FarApp
 
         if (state == RingHelper.SetupState.NeedRing)
         {
-            var folder = ConsoleDialog.InputText(
-                "Настройка ring license",
-                "Утилита ring license не найдена.\n\n" +
-                "Укажите путь к папке с установщиком 1С\n" +
-                "(должны быть файлы *.e1c.car):",
-                @"C:\");
-            R.Invalidate();
-            if (string.IsNullOrWhiteSpace(folder)) return;
-
             string? err = null;
-            ConsoleDialog.ShowProgress("Установка ring", msgs =>
+            ConsoleDialog.ShowProgress("Установка ring license", msgs =>
             {
-                err = RingHelper.ExtractFromCarFolder(folder, msgs);
+                err = RingHelper.ExtractFromResources(msgs);
             });
             R.Invalidate();
 
             if (err != null)
             {
-                ConsoleDialog.ShowText("Ошибка установки", err);
+                ConsoleDialog.ShowText("Ошибка установки ring", err);
                 R.Invalidate();
                 return;
             }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Reflection;
 using System.Text;
 
 namespace Clinkon1C.Core;
@@ -87,108 +88,75 @@ public static class RingHelper
         return null;
     }
 
-    // ── Извлечение из .car файлов ─────────────────────────────────────────────
+    // ── Извлечение из встроенных ресурсов ────────────────────────────────────
 
-    /// <summary>Извлекает ring и license-tools из папки с .car файлами установщика.</summary>
+    /// <summary>
+    /// Извлекает ring и license-tools из встроенных в exe ресурсов (ring.car, license-tools.car).
+    /// Вызывается автоматически при первом входе в модуль Лицензии.
+    /// </summary>
     /// <returns>null при успехе, иначе сообщение об ошибке.</returns>
-    public static string? ExtractFromCarFolder(string carFolder, Action<string>? progress = null)
+    public static string? ExtractFromResources(Action<string>? progress = null)
     {
         try
         {
-            var ringCar    = FindCar(carFolder, "1c-enterprise-ring");
-            var licenseCar = FindCar(carFolder, "1c-enterprise-license-tools");
-
-            if (ringCar == null)    return "Файл ring не найден в папке";
-            if (licenseCar == null) return "Файл license-tools не найден в папке";
+            var asm = Assembly.GetExecutingAssembly();
 
             progress?.Invoke("Извлечение ring...");
             Directory.CreateDirectory(RingDir);
-            ExtractCar(ringCar, RingDir, "data/");
+            using (var stream = asm.GetManifestResourceStream("ring.car"))
+            {
+                if (stream == null) return "Ресурс ring.car не найден в сборке";
+                ExtractCarStream(stream, RingDir, "data/", keepStructure: true);
+            }
 
             progress?.Invoke("Извлечение license-tools...");
             Directory.CreateDirectory(LicDir);
-            ExtractCarFlat(licenseCar, LicDir, "data/");
-
-            // Нативные DLL (josdsk, joshw и т.д.) для чтения аппаратных параметров
-            var dllSrc = Path.Combine(carFolder, "lib", "x86_64");
-            if (Directory.Exists(dllSrc))
+            using (var stream = asm.GetManifestResourceStream("license-tools.car"))
             {
-                progress?.Invoke("Копирование нативных DLL...");
-                CopyNativeDlls(dllSrc, LicDir);
+                if (stream == null) return "Ресурс license-tools.car не найден в сборке";
+                ExtractCarStream(stream, LicDir, "data/", keepStructure: false);
             }
 
             progress?.Invoke("Создание ring-commands.cfg...");
             WriteRingCommandsCfg();
 
-            Logger.Info($"RingHelper: извлечено в {DataRoot}");
+            Logger.Info($"RingHelper: извлечено из ресурсов в {DataRoot}");
             return null;
         }
         catch (Exception ex)
         {
-            Logger.Error($"RingHelper.ExtractFromCarFolder: {ex.Message}");
+            Logger.Error($"RingHelper.ExtractFromResources: {ex.Message}");
             return ex.Message;
         }
     }
 
-    private static string? FindCar(string folder, string prefix)
+    private static void ExtractCarStream(Stream carStream, string destDir,
+        string stripPrefix, bool keepStructure)
     {
-        try
-        {
-            foreach (var f in Directory.GetFiles(folder, "*.e1c.car"))
-                if (Path.GetFileName(f).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    return f;
-        }
-        catch { }
-        return null;
-    }
-
-    // Извлекает содержимое с сохранением структуры поддиректорий (ring/lib/*)
-    private static void ExtractCar(string carPath, string destDir, string stripPrefix)
-    {
-        using var zip = new ZipArchive(File.OpenRead(carPath), ZipArchiveMode.Read);
+        using var zip = new ZipArchive(carStream, ZipArchiveMode.Read);
         foreach (var entry in zip.Entries)
         {
             if (entry.FullName.EndsWith("/")) continue;
             if (!entry.FullName.StartsWith(stripPrefix, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var rel  = entry.FullName.Substring(stripPrefix.Length);
-            var dest = Path.Combine(destDir, rel.Replace('/', Path.DirectorySeparatorChar));
+            string dest;
+            if (keepStructure)
+            {
+                var rel = entry.FullName.Substring(stripPrefix.Length);
+                dest = Path.Combine(destDir, rel.Replace('/', Path.DirectorySeparatorChar));
+            }
+            else
+            {
+                var fileName = Path.GetFileName(entry.FullName);
+                if (string.IsNullOrEmpty(fileName)) continue;
+                dest = Path.Combine(destDir, fileName);
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             using var src = entry.Open();
             using var dst = File.Create(dest);
             src.CopyTo(dst);
-        }
-    }
-
-    // Извлекает только JAR файлы плоско в destDir (для license модуля)
-    private static void ExtractCarFlat(string carPath, string destDir, string stripPrefix)
-    {
-        using var zip = new ZipArchive(File.OpenRead(carPath), ZipArchiveMode.Read);
-        foreach (var entry in zip.Entries)
-        {
-            if (entry.FullName.EndsWith("/")) continue;
-            if (!entry.FullName.StartsWith(stripPrefix, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var fileName = Path.GetFileName(entry.FullName);
-            if (string.IsNullOrEmpty(fileName)) continue;
-
-            var dest = Path.Combine(destDir, fileName);
-            using var src = entry.Open();
-            using var dst = File.Create(dest);
-            src.CopyTo(dst);
-        }
-    }
-
-    private static void CopyNativeDlls(string srcDir, string destDir)
-    {
-        foreach (var subDir in Directory.GetDirectories(srcDir))
-        {
-            var dllDest = Path.Combine(destDir, Path.GetFileName(subDir));
-            Directory.CreateDirectory(dllDest);
-            foreach (var dll in Directory.GetFiles(subDir, "*.dll"))
-                File.Copy(dll, Path.Combine(dllDest, Path.GetFileName(dll)), overwrite: true);
         }
     }
 
