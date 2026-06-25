@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Templates;
 using Clinkon1C.UI;
 
@@ -116,7 +117,8 @@ class Program
             var cache     = new CacheModule();
             var templates = new TemplatesModule();
             var bases     = new BasesModule();
-            new FarApp(cache, templates, bases, updateNotice).Run();
+            var licenses  = new LicensesModule();
+            new FarApp(cache, templates, bases, licenses, updateNotice).Run();
         }
         finally
         {

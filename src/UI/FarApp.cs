@@ -2,6 +2,7 @@ using System.Linq;
 using Clinkon1C.Core;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Templates;
 
 namespace Clinkon1C.UI;
@@ -18,7 +19,8 @@ internal enum NavLevelKind
     TemplatesRoot,   // список пользователей с шаблонами
     TemplatesUser,   // шаблоны конкретного пользователя
     TemplatesGroup,  // содержимое одного шаблона (версии / подпапки)
-    BasesRoot        // список информационных баз
+    BasesRoot,       // список информационных баз
+    LicensesRoot     // список программных лицензий
 }
 
 internal class NavItem
@@ -31,7 +33,8 @@ internal class NavItem
     public bool   CanEnter       { get; init; }  // можно провалиться внутрь
     public bool   IsUnknownGroup { get; init; }  // группа [Неизвестные]
     public string? ModuleId      { get; init; }  // "cache" / "templates" / "bases"
-    public string? Description   { get; init; }  // для Баз: Connect= строка
+    public string? Description   { get; init; }  // для Баз: Connect= строка; для Лицензий: тип
+    public bool    ShowDescCol  { get; init; }  // двухколоночный режим без пометки
     // Физические пути для выделения/удаления
     public List<string> Paths { get; init; } = new List<string>();
     // Для drill-down
@@ -61,6 +64,7 @@ public class FarApp
     private readonly CacheModule     _cache;
     private readonly TemplatesModule _templates;
     private readonly BasesModule     _bases;
+    private readonly LicensesModule  _licenses;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -90,11 +94,12 @@ public class FarApp
 
     // ── Запуск ───────────────────────────────────────────────────────────────
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
-                  string? updateNotice = null)
+                  LicensesModule licenses, string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
         _bases        = bases;
+        _licenses     = licenses;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -278,12 +283,21 @@ public class FarApp
                 },
                 new NavItem
                 {
-                    Name      = "Базы",
-                    SizeBytes = 0,
-                    CanEnter  = true,
-                    ModuleId  = "bases",
-                    Paths     = new List<string>(),
+                    Name        = "Базы",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "bases",
+                    Paths       = new List<string>(),
                     Description = $"{_bases.Entries.Count} записей"
+                },
+                new NavItem
+                {
+                    Name        = "Лицензии",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "licenses",
+                    Paths       = new List<string>(),
+                    Description = "ring license"
                 }
             }
         };
@@ -707,6 +721,40 @@ public class FarApp
         };
     }
 
+    // ── Лицензии ──────────────────────────────────────────────────────────────
+
+    private NavLevel MakeLicensesLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        var sorted = _licenses.Entries.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var e in sorted)
+        {
+            var assoc = e.AssociationType == "HardwareProtectionKey" ? "HASP" :
+                        e.AssociationType == "Computer"              ? "ПК"   : e.AssociationType;
+            var desc  = string.IsNullOrEmpty(assoc) ? e.LicenseType
+                      : string.IsNullOrEmpty(e.LicenseType) ? assoc
+                      : $"{assoc} / {e.LicenseType}";
+
+            items.Add(new NavItem
+            {
+                Name         = e.Name,
+                SizeBytes    = 0,
+                Description  = desc,
+                Paths        = new List<string>(),
+                CanEnter     = true, // Enter → показать полный info
+                ShowDescCol  = true
+            });
+        }
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.LicensesRoot,
+            Title = $"Лицензии [{_licenses.Entries.Count}]",
+            Items = items
+        };
+    }
+
     private static string ShortenPath(string path)
     {
         const int max = 38;
@@ -734,6 +782,8 @@ public class FarApp
                     _nav.Push(MakeTemplatesLevel());
                 else if (item.ModuleId == "bases")
                     _nav.Push(MakeBasesLevel());
+                else if (item.ModuleId == "licenses")
+                    EnterLicenses();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -785,6 +835,10 @@ public class FarApp
                 if (item.Paths.Count > 0)
                     _nav.Push(MakeTemplatesGroupLevel(item.Paths[0], item.Name));
                 break;
+
+            case NavLevelKind.LicensesRoot:
+                DoShowLicenseInfo(item.Name);
+                break;
         }
     }
 
@@ -811,7 +865,8 @@ public class FarApp
                 if (cur.ContextUser != null) rebuilt = MakeUnknownLevel(cur.ContextUser);
                 else                          rebuilt = MakeUnknownFlatLevel();
                 break;
-            case NavLevelKind.BasesRoot:      rebuilt = MakeBasesLevel();     break;
+            case NavLevelKind.BasesRoot:     rebuilt = MakeBasesLevel();     break;
+            case NavLevelKind.LicensesRoot:  rebuilt = MakeLicensesLevel();  break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -857,6 +912,14 @@ public class FarApp
 
         // Сдвигаем курсор вниз
         MoveCursor(1);
+    }
+
+    private NavItem? CurrentItem()
+    {
+        if (_nav.Count == 0) return null;
+        var lvl = _nav.Peek();
+        if (lvl.Items.Count == 0) return null;
+        return lvl.Items[lvl.Cursor];
     }
 
     private void MoveCursor(int delta)
@@ -910,7 +973,10 @@ public class FarApp
                 break;
 
             case ConsoleKey.F8:
-                DoDelete();
+                if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.LicensesRoot)
+                    DoRemoveLicense();
+                else
+                    DoDelete();
                 break;
 
             // Dry Run — работает, но не показываем в подсказке (скрытая функция)
@@ -954,6 +1020,10 @@ public class FarApp
                     DoCopyBases();
                 else if (ch == 'e' && kind2 == NavLevelKind.BasesRoot)
                     DoExportBases();
+                else if (ch == 'a' && kind2 == NavLevelKind.LicensesRoot)
+                    DoActivateLicense();
+                else if (ch == 'v' && kind2 == NavLevelKind.LicensesRoot)
+                    DoValidateLicense();
                 break;
         }
     }
@@ -1149,6 +1219,190 @@ public class FarApp
         R.Invalidate();
     }
 
+    // ── Действия с лицензиями ─────────────────────────────────────────────────
+
+    private void EnterLicenses()
+    {
+        var state = RingHelper.CheckSetup();
+
+        if (state == RingHelper.SetupState.NeedRing)
+        {
+            var folder = ConsoleDialog.InputText(
+                "Настройка ring license",
+                "Утилита ring license не найдена.\n\n" +
+                "Укажите путь к папке с установщиком 1С\n" +
+                "(должны быть файлы *.e1c.car):",
+                @"C:\");
+            R.Invalidate();
+            if (string.IsNullOrWhiteSpace(folder)) return;
+
+            string? err = null;
+            ConsoleDialog.ShowProgress("Установка ring", msgs =>
+            {
+                err = RingHelper.ExtractFromCarFolder(folder, msgs);
+            });
+            R.Invalidate();
+
+            if (err != null)
+            {
+                ConsoleDialog.ShowText("Ошибка установки", err);
+                R.Invalidate();
+                return;
+            }
+            state = RingHelper.CheckSetup();
+        }
+
+        if (state == RingHelper.SetupState.NeedJava)
+        {
+            bool ok = ConsoleDialog.Confirm(
+                "Java не найдена",
+                "Для работы модуля лицензий требуется Java.\n\n" +
+                "Скачать Eclipse Temurin 8 JRE (~55 МБ)?\n" +
+                "Файл будет сохранён в %ProgramData%\\Clinkon1C\\jre\\");
+            R.Invalidate();
+            if (!ok) return;
+
+            string? err = null;
+            ConsoleDialog.ShowProgress("Скачивание Java JRE", msgs =>
+            {
+                err = RingHelper.DownloadJre(msgs);
+            });
+            R.Invalidate();
+
+            if (err != null)
+            {
+                ConsoleDialog.ShowText("Ошибка загрузки JRE", err);
+                R.Invalidate();
+                return;
+            }
+        }
+
+        ConsoleDialog.ShowProgress("Загрузка лицензий", _ => _licenses.Refresh());
+        R.Invalidate();
+        _nav.Push(MakeLicensesLevel());
+    }
+
+    private void DoShowLicenseInfo(string name)
+    {
+        if (string.IsNullOrEmpty(name) || name == "..") return;
+        var info = _licenses.GetFullInfo(name);
+        ConsoleDialog.ShowText($"Лицензия: {name}", info);
+        R.Invalidate();
+    }
+
+    private void DoValidateLicense()
+    {
+        var item = CurrentItem();
+        if (item == null || item.IsUp) return;
+        var name = item.Name;
+        bool ok = ConsoleDialog.Confirm("Проверить лицензию",
+            $"Проверить соответствие оборудования для:\n{name}");
+        R.Invalidate();
+        if (!ok) return;
+
+        (bool res, string msg) result = (false, "");
+        ConsoleDialog.ShowProgress("Проверка лицензии", _ =>
+        {
+            result = _licenses.Validate(name);
+        });
+        R.Invalidate();
+
+        ConsoleDialog.ShowText(
+            result.res ? "Лицензия действительна" : "Ошибка проверки",
+            (string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "OK" : "Ошибка") : result.msg));
+        R.Invalidate();
+    }
+
+    private void DoRemoveLicense()
+    {
+        var item = CurrentItem();
+        if (item == null || item.IsUp) return;
+        var name = item.Name;
+
+        bool ok = ConsoleDialog.Confirm("Удалить лицензию",
+            $"Удалить лицензию из хранилища?\n\n{name}\n\nЭто действие необратимо.");
+        R.Invalidate();
+        if (!ok) return;
+
+        (bool res, string msg) result = (false, "");
+        ConsoleDialog.ShowProgress("Удаление лицензии", _ =>
+        {
+            result = _licenses.Remove(name);
+        });
+        R.Invalidate();
+
+        ConsoleDialog.ShowText(
+            result.res ? "Удалено" : "Ошибка удаления",
+            string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "Успешно" : "Ошибка") : result.msg);
+        R.Invalidate();
+
+        if (result.res)
+        {
+            _licenses.Refresh();
+            RebuildCurrentLevel();
+        }
+    }
+
+    private void DoActivateLicense()
+    {
+        var fields = new (string Key, string Label)[]
+        {
+            ("serial",  "Серийный номер"),
+            ("pin",     "Пин-код"),
+            ("prevpin", "Пред. пин (если есть)"),
+            ("company", "Организация"),
+            ("country", "Страна"),
+            ("zip",     "Индекс"),
+            ("town",    "Город"),
+            ("street",  "Улица"),
+            ("house",   "Дом"),
+            ("email",   "E-mail (необяз.)"),
+        };
+
+        var vals = ConsoleDialog.Form("Активация лицензии 1С", fields);
+        R.Invalidate();
+        if (vals == null) return;
+
+        var p = new Modules.Licenses.ActivateParams
+        {
+            Serial      = vals["serial"],
+            Pin         = vals["pin"],
+            PreviousPin = vals["prevpin"],
+            Company     = vals["company"],
+            Country     = vals["country"],
+            ZipCode     = vals["zip"],
+            Town        = vals["town"],
+            Street      = vals["street"],
+            House       = vals["house"],
+            Email       = vals["email"],
+        };
+
+        if (string.IsNullOrWhiteSpace(p.Serial) || string.IsNullOrWhiteSpace(p.Pin))
+        {
+            ConsoleDialog.ShowText("Ошибка", "Серийный номер и пин-код обязательны.");
+            R.Invalidate();
+            return;
+        }
+
+        (bool res, string msg) result = (false, "");
+        ConsoleDialog.ShowProgress("Активация лицензии", _ =>
+        {
+            result = _licenses.Activate(p);
+        });
+        R.Invalidate();
+
+        ConsoleDialog.ShowText(
+            result.res ? "Активация выполнена" : "Ошибка активации",
+            string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "Успешно" : "Ошибка") : result.msg);
+        R.Invalidate();
+
+        if (result.res)
+        {
+            _licenses.Refresh();
+            RebuildCurrentLevel();
+        }
+    }
+
     // ── Лог ───────────────────────────────────────────────────────────────────
     private void OnLog(string lvl, string txt)
     {
@@ -1210,6 +1464,14 @@ public class FarApp
             return;
         }
 
+        if (kind == NavLevelKind.LicensesRoot)
+        {
+            const int namePartW = 34;
+            var content = R.Fit(" Имя лицензии", namePartW) + R.Fit("Тип / Привязка", InnerW - namePartW);
+            R.BoxRow(2, content, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         bool bySize = _cache.SortBy == SortMode.BySize;
         var nameLabel = bySize ? " Имя" : " Имя ▲";
         var sizeLabel = bySize ? "Размер ▼ " : "Размер   ";
@@ -1259,6 +1521,14 @@ public class FarApp
         {
             content = R.Fit(" [..]", InnerW);
         }
+        else if (item.ShowDescCol && item.Description != null)
+        {
+            // Элемент с двухколоночным описанием (Лицензии)
+            const int namePartW = 34;
+            var name = R.Fit($" ► {item.Name}", namePartW);
+            var desc = R.Fit(item.Description, InnerW - namePartW);
+            content  = name + desc;
+        }
         else if (item.Description != null && item.BaseName != null)
         {
             // Элемент раздела "Базы": [*] Имя    Connect=...
@@ -1292,6 +1562,13 @@ public class FarApp
                 ? $"  {baseItems.Count} баз  │  Отмечено: {marked}  │  [C] Копировать  [E] Экспорт .v8i"
                 : $"  {baseItems.Count} баз  │  [C] Копировать  [E] Экспорт .v8i";
             R.BoxRow(InfoRow, basesInfo, R.HdrFg, R.HdrBg);
+            return;
+        }
+
+        if (lvl.Kind == NavLevelKind.LicensesRoot)
+        {
+            var licInfo = $"  {lvl.Items.Count(i => !i.IsUp)} лицензий  │  [Enter] Инфо  [A] Активация  [V] Проверить  [F8] Удалить";
+            R.BoxRow(InfoRow, licInfo, R.HdrFg, R.HdrBg);
             return;
         }
 
@@ -1336,9 +1613,12 @@ public class FarApp
         bool isBases = kind == NavLevelKind.BasesRoot;
         bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
 
+        bool isLicenses = kind == NavLevelKind.LicensesRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
+            : isLicenses
+            ? $"[Enter] Инфо  [A] Активация  [V] Проверить  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
               + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";

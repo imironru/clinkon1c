@@ -233,6 +233,101 @@ internal static class ConsoleDialog
         }
     }
 
+    // ── Прогресс (блокирующий) ────────────────────────────────────────────────
+    /// <summary>
+    /// Показывает диалог с последним сообщением прогресса.
+    /// action вызывается синхронно; передаёт callback для обновления строки статуса.
+    /// </summary>
+    public static void ShowProgress(string title, Action<Action<string>> action)
+    {
+        var msg   = "...";
+        var lines = new[] { msg };
+
+        void Redraw()
+        {
+            lines[0] = msg;
+            Draw(title, lines, "");
+        }
+
+        // Рисуем начальное состояние
+        Redraw();
+
+        action(text =>
+        {
+            msg = text;
+            Redraw();
+        });
+    }
+
+    // ── Многопольная форма ───────────────────────────────────────────────────
+    /// <summary>
+    /// Форма с несколькими полями ввода. ↑↓/Tab — переключение поля.
+    /// Возвращает словарь key→value или null при отмене.
+    /// </summary>
+    public static Dictionary<string, string>? Form(string title, (string Key, string Label)[] fields,
+        Dictionary<string, string>? defaults = null)
+    {
+        var values = new string[fields.Length];
+        for (int i = 0; i < fields.Length; i++)
+            values[i] = defaults != null && defaults.TryGetValue(fields[i].Key, out var dv) ? dv : "";
+
+        int cursor  = 0;
+        int labelW  = 0;
+        foreach (var f in fields) if (f.Label.Length > labelW) labelW = f.Label.Length;
+        labelW += 2;
+        int w       = Math.Min(Console.WindowWidth - 4, 70);
+        int inputW  = w - labelW - 6;
+        int h       = fields.Length * 2 + 5;
+        int x       = (Console.WindowWidth  - w) / 2;
+        int y       = Math.Max(0, (Console.WindowHeight - h) / 2);
+
+        while (true)
+        {
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, title);
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                var fy   = y + 2 + i * 2;
+                bool cur = i == cursor;
+                CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+                Pos(x + 2, fy);
+                Console.Write(R.Fit(fields[i].Label + ":", labelW));
+                CC(cur ? ConsoleColor.Black : ConsoleColor.White,
+                   cur ? ConsoleColor.Cyan  : ConsoleColor.DarkBlue);
+                Pos(x + 2 + labelW, fy);
+                var display = values[i];
+                if (display.Length > inputW) display = display.Substring(display.Length - inputW);
+                Console.Write(R.Fit(display, inputW));
+            }
+
+            CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + h - 2);
+            Console.Write(R.Fit("[↑↓ Tab] Поле   [Enter] Подтвердить   [Esc] Отмена", w - 4));
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Escape) return null;
+            if (k.Key == ConsoleKey.Enter)
+            {
+                var result = new Dictionary<string, string>();
+                for (int i = 0; i < fields.Length; i++)
+                    result[fields[i].Key] = values[i];
+                return result;
+            }
+            bool shiftTab = k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Shift) != 0;
+            if (k.Key == ConsoleKey.UpArrow || shiftTab)
+                cursor = (cursor - 1 + fields.Length) % fields.Length;
+            else if (k.Key == ConsoleKey.DownArrow || k.Key == ConsoleKey.Tab)
+                cursor = (cursor + 1) % fields.Length;
+            else if (k.Key == ConsoleKey.Backspace && values[cursor].Length > 0)
+                values[cursor] = values[cursor].Substring(0, values[cursor].Length - 1);
+            else if (!char.IsControl(k.KeyChar))
+                values[cursor] += k.KeyChar;
+        }
+    }
+
     // ── Примитивы (прямой вывод в Console) ───────────────────────────────────
     private static void CC(ConsoleColor fg, ConsoleColor bg)
     { Console.ForegroundColor = fg; Console.BackgroundColor = bg; }
