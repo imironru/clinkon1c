@@ -162,25 +162,50 @@ public static class RingHelper
 
     /// <summary>
     /// Создаёт ring-commands.cfg — файл регистрации модуля license для утилиты ring.
-    /// Формат: YAML, описывает расположение JAR-файлов модуля.
-    /// Основной JAR определён в component-manifest.xml: com._1c.license.activator.ring-*.jar
+    /// Формат YAML: outer key = имя модуля, value = список {version, arch, file}.
+    /// Пишем в два места: наш RingDir (для E1C_RING_COMMANDS) и стандартный путь 1C.
     /// </summary>
-    private static void WriteRingCommandsCfg()
+    public static void WriteRingCommandsCfg()
     {
-        var cfg    = Path.Combine(RingDir, "ring-commands.cfg");
-        var licDir = LicDir.Replace('\\', '/');
-        // Основной JAR модуля (из component-manifest.xml: ring-module name="license")
+        // Основной JAR модуля (com._1c.license.activator.ring-*.jar)
         var mainJar = Directory.GetFiles(LicDir, "com._1c.license.activator.ring-*.jar")
                                .FirstOrDefault()?.Replace('\\', '/') ?? "";
 
-        File.WriteAllText(cfg,
+        // Читаем версию из имени JAR (формат: com._1c.license.activator.ring-0.15.0-2.jar)
+        var jarName = Path.GetFileNameWithoutExtension(mainJar.Replace('/', Path.DirectorySeparatorChar));
+        var version = "0.15.0+2"; // fallback
+        if (!string.IsNullOrEmpty(jarName))
+        {
+            // Вида: com._1c.license.activator.ring-0.15.0-2 → версия 0.15.0-2
+            var dashIdx = jarName.IndexOf('-');
+            if (dashIdx >= 0)
+                version = jarName.Substring(dashIdx + 1).Replace("-", "+");
+        }
+
+        var content =
             "---\n" +
-            "instances:\n" +
-            $"  - name: license\n" +
-            $"    version: \"0.15.0+2\"\n" +
-            $"    location: \"{licDir}\"\n" +
-            (mainJar.Length > 0 ? $"    jar: \"{mainJar}\"\n" : ""),
-            Encoding.UTF8);
+            "license:\n" +
+            $"- version: \"{version}\"\n" +
+            $"  arch: x86_64\n" +
+            $"  file: \"{mainJar}\"\n";
+
+        // 1. Наш RingDir — для E1C_RING_COMMANDS override
+        var ourCfg = Path.Combine(RingDir, "ring-commands.cfg");
+        File.WriteAllText(ourCfg, content, Encoding.UTF8);
+
+        // 2. Стандартный путь 1C — %ProgramData%\1C\1CE\ring-commands.cfg
+        try
+        {
+            var oneCPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "1C", "1CE");
+            Directory.CreateDirectory(oneCPath);
+            File.WriteAllText(Path.Combine(oneCPath, "ring-commands.cfg"), content, Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"RingHelper: не удалось записать ring-commands.cfg в %ProgramData%\\1C\\1CE: {ex.Message}");
+        }
     }
 
     // ── Скачивание JRE ────────────────────────────────────────────────────────
@@ -258,10 +283,26 @@ public static class RingHelper
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true,
-            // Используем кодировку по умолчанию системы (cp1251 на русском Windows)
-            StandardOutputEncoding = Encoding.Default,
-            StandardErrorEncoding  = Encoding.Default,
+            // Принудительно UTF-8 через JAVA_TOOL_OPTIONS (ниже),
+            // поэтому кодировка потоков — UTF-8
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding  = Encoding.UTF8,
         };
+
+        // Пересоздаём ring-commands.cfg перед каждым запуском — исправляет битые файлы от старых версий
+        if (Directory.Exists(LicDir) &&
+            Directory.GetFiles(LicDir, "com._1c.license.activator.ring-*.jar").Length > 0)
+        {
+            try { WriteRingCommandsCfg(); } catch { }
+        }
+
+        // Путь к нашему ring-commands.cfg — ring читает его по этой переменной (E1C_RING_COMMANDS)
+        var ourCfg = Path.Combine(RingDir, "ring-commands.cfg");
+        if (File.Exists(ourCfg))
+            psi.EnvironmentVariables["E1C_RING_COMMANDS"] = ourCfg;
+
+        // ring.cmd передаёт RING_OPTS напрямую в java — без сторонних сообщений в stderr
+        psi.EnvironmentVariables["RING_OPTS"] = "-Dfile.encoding=UTF-8";
 
         if (javaExe != null)
         {
