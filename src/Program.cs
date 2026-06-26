@@ -81,6 +81,7 @@ class Program
         }
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Logger.Init();
         Logger.Info($"Clinkon1C v{VERSION} запущен пользователем {Environment.UserName}");
 
         // 1. Сначала — проверка и запрос прав администратора
