@@ -57,27 +57,41 @@ public static class Logger
         catch { }
     }
 
-    // Пакует все clinkon_????????_??????.log в один zip, если их >= 10
+    // Пакует ротированные логи по датам: все clinkon_YYYYMMDD_*.log не за сегодня
+    // → archive_YYYYMMDD.zip (дополняет если уже существует)
     private static void ArchiveOld()
     {
-        var oldLogs = Directory.GetFiles(LogDir, "clinkon_????????_??????.log");
-        if (oldLogs.Length < 10) return;
+        var today = DateTime.Now.ToString("yyyyMMdd");
 
-        var ts      = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var zipPath = Path.Combine(LogDir, $"archive_{ts}.zip");
-        try
+        var byDate = Directory.GetFiles(LogDir, "clinkon_????????_??????.log")
+            .Select(f => (File: f, Date: ExtractDate(f)))
+            .Where(x => x.Date != null && x.Date != today)
+            .GroupBy(x => x.Date!);
+
+        foreach (var group in byDate)
         {
-            using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-            foreach (var log in oldLogs)
+            var zipPath = Path.Combine(LogDir, $"archive_{group.Key}.zip");
+            try
             {
-                zip.CreateEntryFromFile(log, Path.GetFileName(log));
-                File.Delete(log);
+                var mode = File.Exists(zipPath) ? ZipArchiveMode.Update : ZipArchiveMode.Create;
+                using var zip = ZipFile.Open(zipPath, mode);
+                foreach (var (file, _) in group)
+                {
+                    var entry = Path.GetFileName(file);
+                    if (zip.GetEntry(entry) == null)
+                        zip.CreateEntryFromFile(file, entry);
+                    File.Delete(file);
+                }
             }
+            catch { }
         }
-        catch
-        {
-            try { if (File.Exists(zipPath)) File.Delete(zipPath); } catch { }
-        }
+    }
+
+    // clinkon_20260625_143022.log → "20260625"
+    private static string? ExtractDate(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path); // clinkon_20260625_143022
+        return name.Length >= 16 ? name.Substring(8, 8) : null;
     }
 
     private static void WriteEventLog(string message)
