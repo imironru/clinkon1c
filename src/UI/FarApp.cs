@@ -4,6 +4,7 @@ using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Licenses;
+using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
 
 namespace Clinkon1C.UI;
@@ -22,7 +23,8 @@ internal enum NavLevelKind
     TemplatesGroup,  // содержимое одного шаблона (версии / подпапки)
     BasesRoot,       // список информационных баз
     LicensesRoot,    // список программных лицензий
-    AgentsRoot       // список служб ragent
+    AgentsRoot,      // список служб ragent
+    ProcessesRoot    // список запущенных процессов 1С
 }
 
 internal class NavItem
@@ -68,6 +70,7 @@ public class FarApp
     private readonly BasesModule     _bases;
     private readonly LicensesModule  _licenses;
     private readonly RagentModule    _agents;
+    private readonly ProcessesModule _processes;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -97,13 +100,15 @@ public class FarApp
 
     // ── Запуск ───────────────────────────────────────────────────────────────
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
-                  LicensesModule licenses, RagentModule agents, string? updateNotice = null)
+                  LicensesModule licenses, RagentModule agents, ProcessesModule processes,
+                  string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
         _bases        = bases;
         _licenses     = licenses;
         _agents       = agents;
+        _processes    = processes;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -334,6 +339,15 @@ public class FarApp
                     ModuleId    = "agents",
                     Paths       = new List<string>(),
                     Description = "ragent.exe"
+                },
+                new NavItem
+                {
+                    Name        = "Процессы",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "processes",
+                    Paths       = new List<string>(),
+                    Description = "1С клиенты"
                 }
             }
         };
@@ -817,6 +831,37 @@ public class FarApp
         };
     }
 
+    private NavLevel MakeProcessesLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        foreach (var e in _processes.Entries)
+        {
+            var dbDisplay = string.IsNullOrEmpty(e.DbName)
+                ? (string.IsNullOrEmpty(e.DbPath) ? e.ExeName : e.DbPath)
+                : e.DbName;
+            if (!string.IsNullOrEmpty(e.DbType))
+                dbDisplay = $"[{e.DbType[0]}] {dbDisplay}";
+
+            items.Add(new NavItem
+            {
+                Name        = dbDisplay,
+                BaseName    = e.Pid.ToString(),     // PID для операций
+                PathType    = e.Mode,               // Предприятие / Конфигуратор
+                UserName    = e.User1C,             // пользователь 1С
+                Description = e.WinUser,            // Windows-пользователь
+                CanEnter    = true,
+            });
+        }
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.ProcessesRoot,
+            Title = $"Процессы 1С [{_processes.Entries.Count}]",
+            Items = items
+        };
+    }
+
     private static string StatusDisplay(string status) => status switch
     {
         "Running"      => "▶ Работает",
@@ -858,6 +903,8 @@ public class FarApp
                     EnterLicenses();
                 else if (item.ModuleId == "agents")
                     EnterAgents();
+                else if (item.ModuleId == "processes")
+                    EnterProcesses();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -917,6 +964,10 @@ public class FarApp
             case NavLevelKind.AgentsRoot:
                 DoAgentInfo(item.BaseName);
                 break;
+
+            case NavLevelKind.ProcessesRoot:
+                DoProcessInfo(item.BaseName);
+                break;
         }
     }
 
@@ -946,6 +997,7 @@ public class FarApp
             case NavLevelKind.BasesRoot:     rebuilt = MakeBasesLevel();     break;
             case NavLevelKind.LicensesRoot:  rebuilt = MakeLicensesLevel();  break;
             case NavLevelKind.AgentsRoot:    rebuilt = MakeAgentsLevel();    break;
+            case NavLevelKind.ProcessesRoot: rebuilt = MakeProcessesLevel(); break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -1056,6 +1108,8 @@ public class FarApp
                     DoRemoveLicense();
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.AgentsRoot)
                     DoAgentDelete();
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.ProcessesRoot)
+                    DoProcessKill();
                 else
                     DoDelete();
                 break;
@@ -1069,6 +1123,12 @@ public class FarApp
                 if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.AgentsRoot)
                 {
                     ConsoleDialog.ShowProgress("Обновление...", _ => _agents.Refresh());
+                    R.Invalidate();
+                    RebuildCurrentLevel();
+                }
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.ProcessesRoot)
+                {
+                    ConsoleDialog.ShowProgress("Обновление...", _ => _processes.Refresh());
                     R.Invalidate();
                     RebuildCurrentLevel();
                 }
@@ -1105,6 +1165,11 @@ public class FarApp
                     else if (ch == 'r') DoAgentRestart();
                     else if (ch == 'd') DoAgentToggleDebug();
                     else if (ch == 'n') DoAgentNew();
+                }
+                else if (kind2 == NavLevelKind.ProcessesRoot)
+                {
+                    if      (ch == 'k') DoProcessKill();
+                    else if (ch == 'a') DoProcessKillAll();
                 }
                 else if (ch == 's')
                 {
@@ -1538,6 +1603,89 @@ public class FarApp
         _nav.Push(MakeAgentsLevel());
     }
 
+    private void EnterProcesses()
+    {
+        ConsoleDialog.ShowProgress("Сканирование процессов 1С...", _ => _processes.Refresh());
+        R.Invalidate();
+        _nav.Push(MakeProcessesLevel());
+    }
+
+    private void DoProcessInfo(string? pidStr)
+    {
+        if (pidStr == null || !int.TryParse(pidStr, out var pid)) return;
+        var e = _processes.Entries.FirstOrDefault(x => x.Pid == pid);
+        if (e == null) return;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"PID:         {e.Pid}");
+        sb.AppendLine($"Файл:        {e.ExeName}");
+        if (!string.IsNullOrEmpty(e.Version))
+            sb.AppendLine($"Версия 1С:   {e.Version}");
+        sb.AppendLine($"Режим:       {e.Mode}");
+        if (!string.IsNullOrEmpty(e.DbType))
+            sb.AppendLine($"Тип базы:    {e.DbType}");
+        if (!string.IsNullOrEmpty(e.DbPath))
+            sb.AppendLine($"База:        {e.DbPath}");
+        if (!string.IsNullOrEmpty(e.User1C))
+            sb.AppendLine($"Польз. 1С:   {e.User1C}");
+        if (!string.IsNullOrEmpty(e.WinUser))
+            sb.AppendLine($"Windows:     {e.WinUser}");
+        if (!string.IsNullOrEmpty(e.CmdLine))
+        {
+            sb.AppendLine();
+            sb.AppendLine("Командная строка:");
+            sb.AppendLine($"  {e.CmdLine}");
+        }
+
+        ConsoleDialog.ShowText($"Процесс PID {e.Pid}", sb.ToString());
+        R.Invalidate();
+    }
+
+    private void DoProcessKill()
+    {
+        var item = CurrentItem();
+        if (item == null || item.IsUp || item.BaseName == null) return;
+        if (!int.TryParse(item.BaseName, out var pid)) return;
+        var e = _processes.Entries.FirstOrDefault(x => x.Pid == pid);
+        if (e == null) return;
+
+        var name = string.IsNullOrEmpty(e.DbName) ? e.ExeName : e.DbName;
+        if (!ConsoleDialog.Confirm("Завершить процесс", $"Завершить 1С:\n{name} (PID {pid})?"))
+        {
+            R.Invalidate(); return;
+        }
+
+        var err = _processes.Kill(pid);
+        R.Invalidate();
+        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); R.Invalidate(); }
+        _processes.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoProcessKillAll()
+    {
+        int cnt = _processes.Entries.Count;
+        if (cnt == 0) return;
+        if (!ConsoleDialog.Confirm("Завершить все процессы 1С",
+            $"Будут завершены все {cnt} процесс(а) 1С.\nПродолжить?"))
+        {
+            R.Invalidate(); return;
+        }
+
+        List<string> errors = null!;
+        ConsoleDialog.ShowProgress("Завершение процессов...", _ => errors = _processes.KillAll());
+        R.Invalidate();
+
+        if (errors?.Count > 0)
+        {
+            ConsoleDialog.ShowText("Ошибки", string.Join("\n", errors));
+            R.Invalidate();
+        }
+
+        _processes.Refresh();
+        RebuildCurrentLevel();
+    }
+
     private RagentEntry? AgentUnderCursor()
     {
         var item = CurrentItem();
@@ -1878,6 +2026,21 @@ public class FarApp
             return;
         }
 
+        if (kind == NavLevelKind.ProcessesRoot)
+        {
+            const int pidW  = 7;
+            const int modeW = 14;
+            const int dbW   = 32;
+            const int u1cW  = 16;
+            var content = R.Fit(" PID",       pidW)
+                        + R.Fit("Режим",      modeW)
+                        + R.Fit("База",       dbW)
+                        + R.Fit("Польз. 1С",  u1cW)
+                        + R.Fit("Windows",    InnerW - pidW - modeW - dbW - u1cW);
+            R.BoxRow(2, content, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         bool bySize = _cache.SortBy == SortMode.BySize;
         var nameLabel = bySize ? " Имя" : " Имя ▲";
         var sizeLabel = bySize ? "Размер ▼ " : "Размер   ";
@@ -1899,6 +2062,30 @@ public class FarApp
 
     private void DrawItem(int row, NavItem item, bool isCursor, NavLevelKind kind = NavLevelKind.Home)
     {
+        // Процессы — пятиколоночная раскладка
+        if (kind == NavLevelKind.ProcessesRoot && !item.IsUp)
+        {
+            const int pidW  = 7;
+            const int modeW = 14;
+            const int dbW   = 32;
+            const int u1cW  = 16;
+            var pfg = isCursor ? R.CurFg : ConsoleColor.White;
+            var pbg = isCursor ? R.CurBg : R.PanelBg;
+            var pidStr  = item.BaseName ?? "";
+            var modeStr = item.PathType ?? "";
+            var dbStr   = item.Name;
+            var u1cStr  = item.UserName ?? "";
+            var winStr  = item.Description ?? "";
+            R.BoxRow(row,
+                R.Fit($" {pidStr}",  pidW)
+                + R.Fit(modeStr,     modeW)
+                + R.Fit(dbStr,       dbW)
+                + R.Fit(u1cStr,      u1cW)
+                + R.Fit(winStr,      InnerW - pidW - modeW - dbW - u1cW),
+                pfg, pbg);
+            return;
+        }
+
         // Агенты — специальная трёхколоночная раскладка
         if (kind == NavLevelKind.AgentsRoot && !item.IsUp)
         {
@@ -2003,6 +2190,14 @@ public class FarApp
             return;
         }
 
+        if (lvl.Kind == NavLevelKind.ProcessesRoot)
+        {
+            int cnt = _processes.Entries.Count;
+            var procInfo = $"  {cnt} процесс(а)  │  [Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [F5] Обновить";
+            R.BoxRow(InfoRow, procInfo, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         var items   = lvl.Items.Where(i => !i.IsUp).ToList();
         long total  = items.Sum(i => (long)i.SizeBytes);
         int selCnt  = items.Count(i => i.Paths.Any(p => _sel.Contains(p)));
@@ -2044,8 +2239,9 @@ public class FarApp
         bool isBases = kind == NavLevelKind.BasesRoot;
         bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
 
-        bool isLicenses = kind == NavLevelKind.LicensesRoot;
-        bool isAgents   = kind == NavLevelKind.AgentsRoot;
+        bool isLicenses  = kind == NavLevelKind.LicensesRoot;
+        bool isAgents    = kind == NavLevelKind.AgentsRoot;
+        bool isProcesses = kind == NavLevelKind.ProcessesRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
@@ -2053,6 +2249,8 @@ public class FarApp
             ? $"[Enter] Инфо  [A] Активация  [V] Проверить  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : isAgents
             ? $"[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
+            : isProcesses
+            ? $"[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
               + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";

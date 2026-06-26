@@ -33,6 +33,11 @@
     <PackageReference Include="System.Diagnostics.EventLog" Version="8.*" />
   </ItemGroup>
 
+  <!-- System.Management (WMI): для net8 — NuGet, для net48 — в GAC -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <PackageReference Include="System.Management" Version="8.*" />
+  </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Resources\ring.car" LogicalName="ring.car" />
     <EmbeddedResource Include="Resources\license-tools.car" LogicalName="license-tools.car" />
@@ -45,6 +50,7 @@
     <!-- ZipArchive требует отдельной ссылки в net48 -->
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Management" />
     <!-- Встраивает все DLL в exe, чтобы не нужно было раскладывать рядом -->
     <PackageReference Include="Fody" Version="6.*" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
     <PackageReference Include="Costura.Fody" Version="5.*" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />

@@ -7,6 +7,7 @@ using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Licenses;
+using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
 using Clinkon1C.UI;
 
@@ -127,7 +128,8 @@ class Program
             var bases     = new BasesModule();
             var licenses  = new LicensesModule();
             var agents    = new RagentModule();
-            new FarApp(cache, templates, bases, licenses, agents, updateNotice).Run();
+            var processes = new ProcessesModule();
+            new FarApp(cache, templates, bases, licenses, agents, processes, updateNotice).Run();
         }
         finally
         {
