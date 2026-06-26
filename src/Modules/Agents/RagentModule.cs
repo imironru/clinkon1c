@@ -87,13 +87,13 @@ public class RagentModule
         foreach (var part in e.RagentExe.Replace('/', '\\').Split('\\'))
             if (Regex.IsMatch(part, @"^\d+\.\d+\.\d+\.\d+$")) { e.Version = part; break; }
 
-        e.Port      = GetInt(args, "/port",            1540);
-        e.RegPort   = GetInt(args, "/regport",         1541);
-        e.DebugPort = GetInt(args, "/debugServerPort", 1550);
-        e.DataDir   = GetStr(args, "/d",     "");
-        e.Range     = GetStr(args, "/range", "");
+        e.Port      = GetInt(args, "port",            1540);
+        e.RegPort   = GetInt(args, "regport",         1541);
+        e.DebugPort = GetInt(args, "debugServerPort", 1550);
+        e.DataDir   = GetStr(args, "d",     "");
+        e.Range     = GetStr(args, "range", "");
 
-        var dm = Regex.Match(args, @"/debug\s+-(tcp|http)", RegexOptions.IgnoreCase);
+        var dm = Regex.Match(args, @"[/-]debug\s+-(tcp|http)", RegexOptions.IgnoreCase);
         if (dm.Success)
         {
             e.DebugEnabled  = true;
@@ -105,15 +105,17 @@ public class RagentModule
 
     private static int GetInt(string args, string param, int def)
     {
-        var m = Regex.Match(args, param + @"\s+(\d+)", RegexOptions.IgnoreCase);
+        // Принимаем как /param так и -param (оба формата используются в 1С)
+        var m = Regex.Match(args, $@"[/-]{Regex.Escape(param)}\s+(\d+)", RegexOptions.IgnoreCase);
         return m.Success && int.TryParse(m.Groups[1].Value, out int v) ? v : def;
     }
 
     private static string GetStr(string args, string param, string def)
     {
-        var m = Regex.Match(args, param + @"\s+""([^""]+)""", RegexOptions.IgnoreCase);
+        var pat = $@"[/-]{Regex.Escape(param)}\s+";
+        var m = Regex.Match(args, pat + @"""([^""]+)""", RegexOptions.IgnoreCase);
         if (m.Success) return m.Groups[1].Value;
-        m = Regex.Match(args, param + @"\s+(\S+)", RegexOptions.IgnoreCase);
+        m = Regex.Match(args, pat + @"(\S+)", RegexOptions.IgnoreCase);
         return m.Success ? m.Groups[1].Value : def;
     }
 

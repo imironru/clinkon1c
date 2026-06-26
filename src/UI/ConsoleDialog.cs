@@ -45,7 +45,7 @@ internal static class ConsoleDialog
     // ── Текст со скроллом (Dry Run, Help) ────────────────────────────────────
     public static void ShowText(string title, string text)
     {
-        var all = text.Split('\n');
+        var all = text.Replace("\r", "").Split('\n');
         int scroll = 0;
         while (true)
         {
