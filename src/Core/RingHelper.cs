@@ -173,13 +173,23 @@ public static class RingHelper
 
         // Читаем версию из имени JAR (формат: com._1c.license.activator.ring-0.15.0-2.jar)
         var jarName = Path.GetFileNameWithoutExtension(mainJar.Replace('/', Path.DirectorySeparatorChar));
-        var version = "0.15.0-2"; // fallback
+        var version = "0.15.0"; // fallback
         if (!string.IsNullOrEmpty(jarName))
         {
-            // Вида: com._1c.license.activator.ring-0.15.0-2 → версия 0.15.0-2 (Maven-формат, дефис)
+            // Вида: com._1c.license.activator.ring-0.15.0-2 → версия 0.15.0-2
+            //       com._1c.license.activator.ring-0.15    → нормализуем до 0.15.0
             var dashIdx = jarName.IndexOf('-');
             if (dashIdx >= 0)
+            {
                 version = jarName.Substring(dashIdx + 1);
+                // ring требует минимум X.Y.Z; дополняем .0 если компонент меньше трёх
+                var qualSep  = version.IndexOfAny(new[] { '-', '+' });
+                var numeric  = qualSep < 0 ? version : version.Substring(0, qualSep);
+                var qualifier = qualSep < 0 ? "" : version.Substring(qualSep);
+                var dots = numeric.Count(c => c == '.');
+                while (dots < 2) { numeric += ".0"; dots++; }
+                version = numeric + qualifier;
+            }
         }
 
         var content =
