@@ -7,10 +7,8 @@ public static class Logger
     private static readonly string LogDir = Path.Combine(
         Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? ".") ?? ".",
         "logs");
+    private static readonly string LogFile = Path.Combine(LogDir, "clinkon.log");
     private static readonly object _lock = new();
-
-    private static string LogFile =>
-        Path.Combine(LogDir, $"clinkon_{DateTime.Now:yyyy-MM-dd}.log");
 
     // Событие для UI-панели сообщений: (level, message)
     public static event Action<string, string>? MessageLogged;
@@ -55,12 +53,13 @@ public static class Logger
     {
         try
         {
-            var cutoff = DateTime.Now.AddDays(-90);
-            foreach (var f in Directory.GetFiles(LogDir, "clinkon_*.log"))
-            {
-                if (File.GetLastWriteTime(f) < cutoff)
-                    File.Delete(f);
-            }
+            const long MaxBytes = 5 * 1024 * 1024; // 5 МБ
+            if (!File.Exists(LogFile)) return;
+            if (new FileInfo(LogFile).Length < MaxBytes) return;
+
+            var bak = LogFile + ".1";
+            if (File.Exists(bak)) File.Delete(bak);
+            File.Move(LogFile, bak);
         }
         catch { }
     }
