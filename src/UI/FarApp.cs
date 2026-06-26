@@ -1321,13 +1321,11 @@ public class FarApp
 
         if (string.IsNullOrWhiteSpace(fileName)) return;
 
-        // Убираем недопустимые символы
-        foreach (var c in Path.GetInvalidFileNameChars())
-            fileName = fileName.Replace(c.ToString(), "");
-        if (string.IsNullOrWhiteSpace(fileName)) fileName = "bases";
+        var invalid = new HashSet<char>(Path.GetInvalidFileNameChars());
+        var safeName = new string(fileName.Where(ch => !invalid.Contains(ch)).ToArray()).Trim();
+        if (string.IsNullOrWhiteSpace(safeName)) safeName = "bases";
 
         var desktop   = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var safeName  = (fileName ?? "bases").Trim();
         var filePath  = Path.Combine(desktop, safeName + ".v8i");
 
         _bases.ExportToV8i(entries, filePath);
