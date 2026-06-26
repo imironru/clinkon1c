@@ -109,6 +109,7 @@ public class FarApp
         Console.CursorVisible = false;
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+        ConsoleInput.EnableMouse();
         try
         {
             R.Init();
@@ -124,11 +125,33 @@ public class FarApp
                     continue;
                 }
                 Draw();
-                Handle(Console.ReadKey(true));
+
+                // Читаем события до первого значимого (клавиша/клик/колесо)
+                while (true)
+                {
+                    var rec = ConsoleInput.ReadOne();
+                    if (rec.EventType == ConsoleInput.KEY_EVENT && rec.KeyEvent.bKeyDown != 0)
+                    {
+                        Handle(ConsoleInput.ToKeyInfo(rec.KeyEvent));
+                        ConsoleInput.Flush(); // сбрасываем буфер мыши после диалогов
+                        break;
+                    }
+                    if (rec.EventType == ConsoleInput.MOUSE_EVENT)
+                    {
+                        // Пропускаем чистые движения без кнопки/колеса
+                        var m = rec.MouseEvent;
+                        bool pureMove = (m.dwEventFlags == ConsoleInput.MOUSE_MOVED)
+                                     && m.dwButtonState == 0;
+                        if (!pureMove) { HandleMouse(m); break; }
+                    }
+                    // window-resize и прочее → сразу перерисовываем
+                    else if (rec.EventType != ConsoleInput.MOUSE_EVENT) break;
+                }
             }
         }
         finally
         {
+            ConsoleInput.DisableMouse();
             Console.CursorVisible = true;
             Console.ResetColor();
             Console.Clear();
@@ -1026,6 +1049,47 @@ public class FarApp
                     DoValidateLicense();
                 break;
         }
+    }
+
+    // ── Обработка мыши ───────────────────────────────────────────────────────
+    private void HandleMouse(ConsoleInput.MOUSE_EVENT_RECORD m)
+    {
+        // Колесо мыши — прокрутка списка
+        if ((m.dwEventFlags & ConsoleInput.MOUSE_WHEELED) != 0)
+        {
+            // Старший WORD dwButtonState — знаковый delta (положительный = вверх)
+            int delta = (short)(m.dwButtonState >> 16) > 0 ? -3 : 3;
+            MoveCursor(delta);
+            return;
+        }
+
+        // Обрабатываем только нажатие левой кнопки
+        if ((m.dwButtonState & ConsoleInput.LEFT_BUTTON) == 0) return;
+
+        bool dbl = (m.dwEventFlags & ConsoleInput.DOUBLE_CLICK) != 0;
+        int  y   = m.MouseY;
+
+        // Клик по области элементов списка
+        if (y >= ItemTop && y <= ItemBot)
+        {
+            var lvl = _nav.Peek();
+            int idx = lvl.ScrollTop + (y - ItemTop);
+            if (idx < 0 || idx >= lvl.Items.Count) return;
+
+            if (lvl.Cursor == idx)
+            {
+                // Повторный клик / двойной клик → Enter
+                if (dbl) Enter();
+            }
+            else
+            {
+                // Первый клик → переместить курсор
+                lvl.Cursor = idx;
+                if (dbl) Enter(); // сразу активировать при двойном
+            }
+        }
+
+        // Клик по [..] в строке заголовка не обрабатываем — для этого есть Backspace/←
     }
 
     // ── Действия ─────────────────────────────────────────────────────────────
