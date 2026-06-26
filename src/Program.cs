@@ -13,7 +13,7 @@ namespace Clinkon1C;
 
 class Program
 {
-    public const string VERSION = "1.0.0";
+    public const string VERSION = "1.2.3";
     private const string GithubApiUrl = "https://api.github.com/repos/iMironRU/Clinkon1C/releases/latest";
 
     /// <summary>Версия с номером сборки: "1.0.0 b26" или просто "1.0.0" если нет build number.</summary>
