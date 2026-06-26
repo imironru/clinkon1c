@@ -6,7 +6,7 @@ public static class Logger
 {
     private static readonly string LogDir = Path.Combine(
         Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? ".") ?? ".",
-        "logs");
+        "Clinkon1C");
     private static readonly string LogFile = Path.Combine(LogDir, "clinkon.log");
     private static readonly object _lock = new();
 
