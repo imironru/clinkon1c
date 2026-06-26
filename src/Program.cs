@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Principal;
 using System.Text.Json.Serialization;
 using Clinkon1C.Core;
+using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Licenses;
@@ -13,7 +14,7 @@ namespace Clinkon1C;
 
 class Program
 {
-    public const string VERSION = "1.2.5";
+    public const string VERSION = "1.2.6";
     private const string GithubApiUrl = "https://api.github.com/repos/iMironRU/Clinkon1C/releases/latest";
 
     /// <summary>Версия с номером сборки: "1.0.0 b26" или просто "1.0.0" если нет build number.</summary>
@@ -118,7 +119,8 @@ class Program
             var templates = new TemplatesModule();
             var bases     = new BasesModule();
             var licenses  = new LicensesModule();
-            new FarApp(cache, templates, bases, licenses, updateNotice).Run();
+            var agents    = new RagentModule();
+            new FarApp(cache, templates, bases, licenses, agents, updateNotice).Run();
         }
         finally
         {

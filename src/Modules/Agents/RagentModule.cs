@@ -1,0 +1,358 @@
+using System.Runtime.InteropServices;
+using System.ServiceProcess;
+using System.Text;
+using System.Text.RegularExpressions;
+using Clinkon1C.Core;
+using Microsoft.Win32;
+
+namespace Clinkon1C.Modules.Agents;
+
+public class RagentEntry
+{
+    public string ServiceKey    { get; set; } = "";
+    public string DisplayName   { get; set; } = "";
+    public string ImagePath     { get; set; } = "";
+    public string RagentExe     { get; set; } = "";
+    public string Version       { get; set; } = "";
+    public int    Port          { get; set; } = 1540;
+    public string DataDir       { get; set; } = "";
+    public int    RegPort       { get; set; } = 1541;
+    public string Range         { get; set; } = "";
+    public bool   DebugEnabled  { get; set; }
+    public string DebugProtocol { get; set; } = "tcp";
+    public int    DebugPort     { get; set; } = 1550;
+    public string Status        { get; set; } = "Unknown";
+
+    public bool IsRunning => Status == "Running";
+}
+
+public class RagentModule
+{
+    public List<RagentEntry> Entries { get; } = new();
+
+    // ── Сканирование ──────────────────────────────────────────────────────────
+
+    public void Refresh()
+    {
+        Entries.Clear();
+        try
+        {
+            using var services = Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Services");
+            if (services == null) return;
+
+            foreach (var name in services.GetSubKeyNames())
+            {
+                using var svc = services.OpenSubKey(name);
+                var img = svc?.GetValue("ImagePath") as string;
+                if (img == null) continue;
+                if (img.IndexOf("ragent", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                var entry = Parse(name, svc!, img);
+                if (entry != null) Entries.Add(entry);
+            }
+
+            Entries.Sort((a, b) => a.Port.CompareTo(b.Port));
+
+            foreach (var e in Entries)
+                e.Status = QueryStatus(e.ServiceKey);
+        }
+        catch (Exception ex) { Logger.Error($"RagentModule.Refresh: {ex.Message}"); }
+    }
+
+    private static RagentEntry? Parse(string key, RegistryKey svc, string img)
+    {
+        var e = new RagentEntry
+        {
+            ServiceKey  = key,
+            DisplayName = svc.GetValue("DisplayName") as string ?? key,
+            ImagePath   = img,
+        };
+
+        // Извлекаем путь к exe (может быть в кавычках)
+        string args;
+        if (img.StartsWith("\""))
+        {
+            int end = img.IndexOf('"', 1);
+            if (end < 0) return null;
+            e.RagentExe = img.Substring(1, end - 1);
+            args = img.Substring(end + 1).Trim();
+        }
+        else
+        {
+            int sp = img.IndexOf(' ');
+            if (sp < 0) { e.RagentExe = img; args = ""; }
+            else { e.RagentExe = img.Substring(0, sp); args = img.Substring(sp + 1).Trim(); }
+        }
+
+        // Версия 1С из пути (…\8.3.25.1234\bin\ragent.exe)
+        foreach (var part in e.RagentExe.Replace('/', '\\').Split('\\'))
+            if (Regex.IsMatch(part, @"^\d+\.\d+\.\d+\.\d+$")) { e.Version = part; break; }
+
+        e.Port      = GetInt(args, "/port",            1540);
+        e.RegPort   = GetInt(args, "/regport",         1541);
+        e.DebugPort = GetInt(args, "/debugServerPort", 1550);
+        e.DataDir   = GetStr(args, "/d",     "");
+        e.Range     = GetStr(args, "/range", "");
+
+        var dm = Regex.Match(args, @"/debug\s+-(tcp|http)", RegexOptions.IgnoreCase);
+        if (dm.Success)
+        {
+            e.DebugEnabled  = true;
+            e.DebugProtocol = dm.Groups[1].Value.ToLower();
+        }
+
+        return e;
+    }
+
+    private static int GetInt(string args, string param, int def)
+    {
+        var m = Regex.Match(args, param + @"\s+(\d+)", RegexOptions.IgnoreCase);
+        return m.Success && int.TryParse(m.Groups[1].Value, out int v) ? v : def;
+    }
+
+    private static string GetStr(string args, string param, string def)
+    {
+        var m = Regex.Match(args, param + @"\s+""([^""]+)""", RegexOptions.IgnoreCase);
+        if (m.Success) return m.Groups[1].Value;
+        m = Regex.Match(args, param + @"\s+(\S+)", RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups[1].Value : def;
+    }
+
+    private static string QueryStatus(string key)
+    {
+        try { using var sc = new ServiceController(key); return sc.Status.ToString(); }
+        catch { return "Unknown"; }
+    }
+
+    // ── Поиск установленных версий 1С ─────────────────────────────────────────
+
+    public static List<(string Version, string RagentExe)> FindVersions()
+    {
+        var result = new List<(string, string)>();
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        }.Where(r => !string.IsNullOrEmpty(r)).Distinct();
+
+        foreach (var root in roots)
+        {
+            var dir1cv8 = Path.Combine(root, "1cv8");
+            if (!Directory.Exists(dir1cv8)) continue;
+            foreach (var ver in Directory.GetDirectories(dir1cv8))
+            {
+                var exe = Path.Combine(ver, "bin", "ragent.exe");
+                if (File.Exists(exe))
+                    result.Add((Path.GetFileName(ver), exe));
+            }
+        }
+
+        result.Sort((a, b) =>
+            string.Compare(b.Version, a.Version, StringComparison.OrdinalIgnoreCase));
+        return result;
+    }
+
+    // ── Управление службой ────────────────────────────────────────────────────
+
+    public string? StartService(string key)
+    {
+        try
+        {
+            using var sc = new ServiceController(key);
+            if (sc.Status == ServiceControllerStatus.Running) return null;
+            sc.Start();
+            sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20));
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    public string? StopService(string key)
+    {
+        try
+        {
+            using var sc = new ServiceController(key);
+            if (sc.Status == ServiceControllerStatus.Stopped) return null;
+            sc.Stop();
+            sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
+            return null;
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    public string? RestartService(string key)
+    {
+        var err = StopService(key);
+        if (err != null) return err;
+        return StartService(key);
+    }
+
+    // ── Переключение отладки ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Меняет режим отладки через реестр (ImagePath + DisplayName).
+    /// protocol=null — выключить отладку.
+    /// Не перезапускает службу — это задача вызывающего кода.
+    /// </summary>
+    public string? SetDebug(RagentEntry entry, string? protocol)
+    {
+        try
+        {
+            var newImg = Regex.Replace(
+                entry.ImagePath, @"\s*/debug\s+-\w+", "", RegexOptions.IgnoreCase).TrimEnd();
+            if (protocol != null)
+                newImg += $" /debug -{protocol}";
+
+            var baseName   = Regex.Replace(entry.DisplayName, @"\s*\[DEBUG:[^\]]*\]", "").Trim();
+            var newDisplay = protocol != null
+                ? $"{baseName} [DEBUG:{protocol.ToUpper()}]"
+                : baseName;
+
+            using var svcKey = Registry.LocalMachine.OpenSubKey(
+                $@"SYSTEM\CurrentControlSet\Services\{entry.ServiceKey}", writable: true);
+            if (svcKey == null)
+                return "Не удалось открыть ключ службы в реестре (недостаточно прав)";
+
+            svcKey.SetValue("ImagePath",   newImg);
+            svcKey.SetValue("DisplayName", newDisplay);
+
+            entry.ImagePath     = newImg;
+            entry.DisplayName   = newDisplay;
+            entry.DebugEnabled  = protocol != null;
+            entry.DebugProtocol = protocol ?? entry.DebugProtocol;
+
+            Logger.Info($"ragent {entry.ServiceKey}: отладка → {(protocol ?? "выкл")}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"RagentModule.SetDebug: {ex.Message}");
+            return ex.Message;
+        }
+    }
+
+    // ── Создание / удаление ───────────────────────────────────────────────────
+
+    public class CreateParams
+    {
+        public string  RagentExe { get; set; } = "";
+        public int     Port      { get; set; } = 1540;
+        public int     RegPort   { get; set; } = 1541;
+        public string  Range     { get; set; } = "1560:1591";
+        public string  DataDir   { get; set; } = "";
+        public string? Protocol  { get; set; }
+    }
+
+    public string? CreateAgent(CreateParams p)
+    {
+        try
+        {
+            var key     = $"1C_Agent_{p.Port}";
+            var display = $"1C Агент :{p.Port}"
+                + (p.Protocol != null ? $" [DEBUG:{p.Protocol.ToUpper()}]" : "");
+
+            var sb = new StringBuilder();
+            sb.Append($"\"{p.RagentExe}\"");
+            sb.Append($" /port {p.Port}");
+            if (p.RegPort > 0)               sb.Append($" /regport {p.RegPort}");
+            if (!string.IsNullOrEmpty(p.Range))   sb.Append($" /range {p.Range}");
+            if (!string.IsNullOrEmpty(p.DataDir)) sb.Append($" /d \"{p.DataDir.TrimEnd('\\')}\"");
+            if (p.Protocol != null)          sb.Append($" /debug -{p.Protocol}");
+
+            var err = ScmCreate(key, display, sb.ToString());
+            if (err != null) return err;
+
+            Logger.Info($"ragent: создан агент {key} порт {p.Port}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"RagentModule.CreateAgent: {ex.Message}");
+            return ex.Message;
+        }
+    }
+
+    public string? DeleteAgent(string key)
+    {
+        try
+        {
+            StopService(key);
+            var err = ScmDelete(key);
+            if (err != null) return err;
+            Logger.Info($"ragent: удалён агент {key}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"RagentModule.DeleteAgent: {ex.Message}");
+            return ex.Message;
+        }
+    }
+
+    // ── Win32 SCM (create / delete без sc.exe) ────────────────────────────────
+
+    private const uint SC_MANAGER_ALL_ACCESS     = 0xF003F;
+    private const uint SERVICE_WIN32_OWN_PROCESS = 0x00000010;
+    private const uint SERVICE_AUTO_START        = 0x00000002;
+    private const uint SERVICE_ERROR_NORMAL      = 0x00000001;
+    private const uint SERVICE_ALL_ACCESS        = 0xF01FF;
+    private const uint DELETE                    = 0x00010000;
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr OpenSCManager(string? machine, string? db, uint access);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateService(IntPtr hScm,
+        string name, string display, uint access,
+        uint type, uint start, uint error,
+        string binPath, string? group, IntPtr tag,
+        string? deps, string? account, string? pwd);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr OpenService(IntPtr hScm, string name, uint access);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool DeleteService(IntPtr hSvc);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool CloseServiceHandle(IntPtr h);
+
+    private static string? ScmCreate(string key, string display, string binPath)
+    {
+        var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+        if (hScm == IntPtr.Zero)
+            return $"OpenSCManager: ошибка {Marshal.GetLastWin32Error()}";
+        try
+        {
+            var hSvc = CreateService(hScm, key, display, SERVICE_ALL_ACCESS,
+                SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
+                binPath, null, IntPtr.Zero, null, null, null);
+            if (hSvc == IntPtr.Zero)
+                return $"CreateService: ошибка {Marshal.GetLastWin32Error()}";
+            CloseServiceHandle(hSvc);
+            return null;
+        }
+        finally { CloseServiceHandle(hScm); }
+    }
+
+    private static string? ScmDelete(string key)
+    {
+        var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+        if (hScm == IntPtr.Zero)
+            return $"OpenSCManager: ошибка {Marshal.GetLastWin32Error()}";
+        try
+        {
+            var hSvc = OpenService(hScm, key, DELETE);
+            if (hSvc == IntPtr.Zero)
+                return $"OpenService: ошибка {Marshal.GetLastWin32Error()}";
+            try
+            {
+                return DeleteService(hSvc) ? null
+                    : $"DeleteService: ошибка {Marshal.GetLastWin32Error()}";
+            }
+            finally { CloseServiceHandle(hSvc); }
+        }
+        finally { CloseServiceHandle(hScm); }
+    }
+}

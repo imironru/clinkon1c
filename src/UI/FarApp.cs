@@ -1,5 +1,6 @@
 using System.Linq;
 using Clinkon1C.Core;
+using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Licenses;
@@ -20,7 +21,8 @@ internal enum NavLevelKind
     TemplatesUser,   // шаблоны конкретного пользователя
     TemplatesGroup,  // содержимое одного шаблона (версии / подпапки)
     BasesRoot,       // список информационных баз
-    LicensesRoot     // список программных лицензий
+    LicensesRoot,    // список программных лицензий
+    AgentsRoot       // список служб ragent
 }
 
 internal class NavItem
@@ -65,6 +67,7 @@ public class FarApp
     private readonly TemplatesModule _templates;
     private readonly BasesModule     _bases;
     private readonly LicensesModule  _licenses;
+    private readonly RagentModule    _agents;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -94,12 +97,13 @@ public class FarApp
 
     // ── Запуск ───────────────────────────────────────────────────────────────
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
-                  LicensesModule licenses, string? updateNotice = null)
+                  LicensesModule licenses, RagentModule agents, string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
         _bases        = bases;
         _licenses     = licenses;
+        _agents       = agents;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -321,6 +325,15 @@ public class FarApp
                     ModuleId    = "licenses",
                     Paths       = new List<string>(),
                     Description = "ring license"
+                },
+                new NavItem
+                {
+                    Name        = "Агенты",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "agents",
+                    Paths       = new List<string>(),
+                    Description = "ragent.exe"
                 }
             }
         };
@@ -778,6 +791,42 @@ public class FarApp
         };
     }
 
+    // ── Агенты ───────────────────────────────────────────────────────────────
+
+    private NavLevel MakeAgentsLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        foreach (var e in _agents.Entries)
+        {
+            items.Add(new NavItem
+            {
+                Name        = e.DisplayName,
+                BaseName    = e.ServiceKey,           // ключ для операций
+                PathType    = e.Version,              // версия 1С (переиспользуем поле)
+                Description = StatusDisplay(e.Status), // статус
+                CanEnter    = true,
+            });
+        }
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.AgentsRoot,
+            Title = $"Агенты сервера 1С [{_agents.Entries.Count}]",
+            Items = items
+        };
+    }
+
+    private static string StatusDisplay(string status) => status switch
+    {
+        "Running"      => "▶ Работает",
+        "Stopped"      => "■ Остановлен",
+        "StartPending" => "⏳ Запуск...",
+        "StopPending"  => "⏳ Остановка...",
+        "Paused"       => "⏸ Пауза",
+        _              => $"? {status}",
+    };
+
     private static string ShortenPath(string path)
     {
         const int max = 38;
@@ -807,6 +856,8 @@ public class FarApp
                     _nav.Push(MakeBasesLevel());
                 else if (item.ModuleId == "licenses")
                     EnterLicenses();
+                else if (item.ModuleId == "agents")
+                    EnterAgents();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -862,6 +913,10 @@ public class FarApp
             case NavLevelKind.LicensesRoot:
                 DoShowLicenseInfo(item.Name);
                 break;
+
+            case NavLevelKind.AgentsRoot:
+                DoAgentInfo(item.BaseName);
+                break;
         }
     }
 
@@ -890,6 +945,7 @@ public class FarApp
                 break;
             case NavLevelKind.BasesRoot:     rebuilt = MakeBasesLevel();     break;
             case NavLevelKind.LicensesRoot:  rebuilt = MakeLicensesLevel();  break;
+            case NavLevelKind.AgentsRoot:    rebuilt = MakeAgentsLevel();    break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -998,6 +1054,8 @@ public class FarApp
             case ConsoleKey.F8:
                 if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.LicensesRoot)
                     DoRemoveLicense();
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.AgentsRoot)
+                    DoAgentDelete();
                 else
                     DoDelete();
                 break;
@@ -1008,7 +1066,14 @@ public class FarApp
                 break;
 
             case ConsoleKey.F5:
-                Rescan();
+                if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.AgentsRoot)
+                {
+                    ConsoleDialog.ShowProgress("Обновление...", _ => _agents.Refresh());
+                    R.Invalidate();
+                    RebuildCurrentLevel();
+                }
+                else
+                    Rescan();
                 break;
 
             case ConsoleKey.F1:
@@ -1033,7 +1098,15 @@ public class FarApp
             default:
                 var kind2 = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
                 char ch = char.ToLower(k.KeyChar);
-                if (ch == 's')
+                if (kind2 == NavLevelKind.AgentsRoot)
+                {
+                    if      (ch == 's') DoAgentStart();
+                    else if (ch == 't') DoAgentStop();
+                    else if (ch == 'r') DoAgentRestart();
+                    else if (ch == 'd') DoAgentToggleDebug();
+                    else if (ch == 'n') DoAgentNew();
+                }
+                else if (ch == 's')
                 {
                     _cache.SortBy = _cache.SortBy == SortMode.ByName
                         ? SortMode.BySize : SortMode.ByName;
@@ -1458,6 +1531,275 @@ public class FarApp
         }
     }
 
+    // ── Действия с агентами ───────────────────────────────────────────────────
+
+    private void EnterAgents()
+    {
+        ConsoleDialog.ShowProgress("Сканирование агентов...", _ => _agents.Refresh());
+        R.Invalidate();
+        _nav.Push(MakeAgentsLevel());
+    }
+
+    private RagentEntry? AgentUnderCursor()
+    {
+        var item = CurrentItem();
+        if (item == null || item.IsUp || item.BaseName == null) return null;
+        return _agents.Entries.FirstOrDefault(e => e.ServiceKey == item.BaseName);
+    }
+
+    private void DoAgentInfo(string? key)
+    {
+        if (key == null) return;
+        var e = _agents.Entries.FirstOrDefault(x => x.ServiceKey == key);
+        if (e == null) return;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Служба:    {e.ServiceKey}");
+        sb.AppendLine($"Имя:       {e.DisplayName}");
+        sb.AppendLine($"Версия 1С: {e.Version}");
+        sb.AppendLine($"Порт:      {e.Port}");
+        if (e.RegPort > 0) sb.AppendLine($"Порт rmngr:{e.RegPort}");
+        if (!string.IsNullOrEmpty(e.Range)) sb.AppendLine($"Диапазон:  {e.Range}");
+        if (!string.IsNullOrEmpty(e.DataDir)) sb.AppendLine($"Каталог:   {e.DataDir}");
+        sb.AppendLine(e.DebugEnabled
+            ? $"Отладка:   {e.DebugProtocol.ToUpper()} порт {e.DebugPort}"
+            : "Отладка:   выключена");
+        sb.AppendLine($"Статус:    {StatusDisplay(e.Status)}");
+        sb.AppendLine();
+        sb.AppendLine("Команда:");
+        sb.AppendLine($"  {e.ImagePath}");
+
+        ConsoleDialog.ShowText($"Агент: {e.DisplayName}", sb.ToString());
+        R.Invalidate();
+    }
+
+    private void DoAgentStart()
+    {
+        var e = AgentUnderCursor();
+        if (e == null) return;
+        if (e.IsRunning)
+        {
+            ConsoleDialog.ShowText("Запуск", $"Служба уже запущена:\n{e.DisplayName}");
+            R.Invalidate(); return;
+        }
+
+        string? err = null;
+        ConsoleDialog.ShowProgress($"Запуск: {e.DisplayName}",
+            _ => err = _agents.StartService(e.ServiceKey));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка запуска", err); R.Invalidate(); }
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoAgentStop()
+    {
+        var e = AgentUnderCursor();
+        if (e == null) return;
+        if (!e.IsRunning)
+        {
+            ConsoleDialog.ShowText("Стоп", $"Служба уже остановлена:\n{e.DisplayName}");
+            R.Invalidate(); return;
+        }
+
+        if (!ConsoleDialog.Confirm("Остановить службу", $"Остановить агент?\n\n{e.DisplayName}"))
+        { R.Invalidate(); return; }
+
+        string? err = null;
+        ConsoleDialog.ShowProgress($"Остановка: {e.DisplayName}",
+            _ => err = _agents.StopService(e.ServiceKey));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка остановки", err); R.Invalidate(); }
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoAgentRestart()
+    {
+        var e = AgentUnderCursor();
+        if (e == null) return;
+
+        if (!ConsoleDialog.Confirm("Перезапуск службы", $"Перезапустить агент?\n\n{e.DisplayName}"))
+        { R.Invalidate(); return; }
+
+        string? err = null;
+        ConsoleDialog.ShowProgress($"Перезапуск: {e.DisplayName}",
+            _ => err = _agents.RestartService(e.ServiceKey));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка перезапуска", err); R.Invalidate(); }
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoAgentToggleDebug()
+    {
+        var e = AgentUnderCursor();
+        if (e == null) return;
+
+        string? newProto;
+
+        if (e.DebugEnabled)
+        {
+            var choices = new[]
+            {
+                $"Выключить отладку (текущая: {e.DebugProtocol.ToUpper()})",
+                $"Переключить на {(e.DebugProtocol == "tcp" ? "HTTP" : "TCP")}",
+            };
+            var sel = ConsoleDialog.MultiSelect(e.DisplayName, choices);
+            R.Invalidate();
+            if (sel.Count == 0) return;
+            newProto = sel[0] == 0 ? null
+                     : (e.DebugProtocol == "tcp" ? "http" : "tcp");
+        }
+        else
+        {
+            var choices = new[] { "TCP (/debug -tcp)", "HTTP (/debug -http)" };
+            var sel = ConsoleDialog.MultiSelect($"Включить отладку: {e.DisplayName}", choices);
+            R.Invalidate();
+            if (sel.Count == 0) return;
+            newProto = sel[0] == 0 ? "tcp" : "http";
+        }
+
+        var err = _agents.SetDebug(e, newProto);
+        R.Invalidate();
+
+        if (err != null)
+        {
+            ConsoleDialog.ShowText("Ошибка", err);
+            R.Invalidate();
+            _agents.Refresh();
+            RebuildCurrentLevel();
+            return;
+        }
+
+        if (e.IsRunning)
+        {
+            var action = newProto == null ? "отключения" : "включения";
+            if (ConsoleDialog.Confirm("Перезапуск",
+                    $"Для {action} отладки нужен перезапуск.\n\nПерезапустить {e.DisplayName}?"))
+            {
+                string? re = null;
+                ConsoleDialog.ShowProgress("Перезапуск...",
+                    _ => re = _agents.RestartService(e.ServiceKey));
+                R.Invalidate();
+                if (re != null) { ConsoleDialog.ShowText("Ошибка перезапуска", re); R.Invalidate(); }
+            }
+            else R.Invalidate();
+        }
+
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoAgentNew()
+    {
+        var versions = RagentModule.FindVersions();
+        if (versions.Count == 0)
+        {
+            ConsoleDialog.ShowText("Агенты",
+                "Установки 1С с ragent.exe не найдены.\n\nПуть поиска:\n  %ProgramFiles%\\1cv8\\*\\bin\\ragent.exe");
+            R.Invalidate(); return;
+        }
+
+        // Выбор версии 1С
+        int chosenIdx;
+        if (versions.Count == 1)
+        {
+            chosenIdx = 0;
+        }
+        else
+        {
+            var verNames = versions.Select(v => v.Version).ToArray();
+            var selVer = ConsoleDialog.MultiSelect("Выберите версию 1С для нового агента", verNames);
+            R.Invalidate();
+            if (selVer.Count == 0) return;
+            chosenIdx = selVer[0];
+        }
+        var selExe     = versions[chosenIdx].RagentExe;
+        var selVersion = versions[chosenIdx].Version;
+
+        // Параметры агента
+        var fields = new (string Key, string Label)[]
+        {
+            ("port",    "Порт агента"),
+            ("regport", "Порт rmngr"),
+            ("range",   "Диапазон портов"),
+            ("datadir", "Каталог данных /d"),
+        };
+        var defaults = new Dictionary<string, string>
+        {
+            ["port"]    = "1540",
+            ["regport"] = "1541",
+            ["range"]   = "1560:1591",
+            ["datadir"] = "",
+        };
+        var vals = ConsoleDialog.Form($"Новый агент 1С {selVersion}", fields, defaults);
+        R.Invalidate();
+        if (vals == null) return;
+
+        // Режим отладки
+        string? proto = null;
+        if (ConsoleDialog.Confirm("Отладка", "Включить отладку для нового агента?"))
+        {
+            var dbgChoices = new[] { "TCP (/debug -tcp)", "HTTP (/debug -http)" };
+            var selDbg = ConsoleDialog.MultiSelect("Выберите протокол отладки", dbgChoices);
+            R.Invalidate();
+            proto = selDbg.Count > 0 && selDbg[0] == 1 ? "http" : "tcp";
+        }
+        else R.Invalidate();
+
+        if (!int.TryParse(vals["port"], out int port) || port < 1 || port > 65535)
+        {
+            ConsoleDialog.ShowText("Ошибка", "Некорректный порт.");
+            R.Invalidate(); return;
+        }
+
+        var cp = new RagentModule.CreateParams
+        {
+            RagentExe = selExe,
+            Port      = port,
+            RegPort   = int.TryParse(vals["regport"], out int rp) ? rp : port + 1,
+            Range     = vals.TryGetValue("range", out var rng) ? rng : "1560:1591",
+            DataDir   = vals.TryGetValue("datadir", out var dd) ? dd : "",
+            Protocol  = proto,
+        };
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Создание службы...", _ => err = _agents.CreateAgent(cp));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка создания", err); R.Invalidate(); return; }
+
+        ConsoleDialog.ShowText("Готово",
+            $"Агент на порту {port} зарегистрирован.\n\nВ списке нажмите [S] для запуска.");
+        R.Invalidate();
+
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoAgentDelete()
+    {
+        var e = AgentUnderCursor();
+        if (e == null) return;
+
+        if (!ConsoleDialog.Confirm("Удалить службу агента",
+            $"Снять регистрацию и удалить службу?\n\n{e.DisplayName}\n\nСлужба будет остановлена."))
+        { R.Invalidate(); return; }
+
+        string? err = null;
+        ConsoleDialog.ShowProgress($"Удаление: {e.DisplayName}",
+            _ => err = _agents.DeleteAgent(e.ServiceKey));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка удаления", err); R.Invalidate(); }
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
     // ── Лог ───────────────────────────────────────────────────────────────────
     private void OnLog(string lvl, string txt)
     {
@@ -1527,6 +1869,17 @@ public class FarApp
             return;
         }
 
+        if (kind == NavLevelKind.AgentsRoot)
+        {
+            const int nameW = 40;
+            const int verW  = 12;
+            var content = R.Fit(" Служба", nameW)
+                        + R.Fit("Версия 1С", verW)
+                        + R.Fit("Статус", InnerW - nameW - verW);
+            R.BoxRow(2, content, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         bool bySize = _cache.SortBy == SortMode.BySize;
         var nameLabel = bySize ? " Имя" : " Имя ▲";
         var sizeLabel = bySize ? "Размер ▼ " : "Размер   ";
@@ -1540,14 +1893,30 @@ public class FarApp
         {
             int idx = lvl.ScrollTop + (row - ItemTop);
             if (idx < lvl.Items.Count)
-                DrawItem(row, lvl.Items[idx], idx == lvl.Cursor);
+                DrawItem(row, lvl.Items[idx], idx == lvl.Cursor, lvl.Kind);
             else
                 R.BoxRow(row, "", R.PanelFg, R.PanelBg);
         }
     }
 
-    private void DrawItem(int row, NavItem item, bool isCursor)
+    private void DrawItem(int row, NavItem item, bool isCursor, NavLevelKind kind = NavLevelKind.Home)
     {
+        // Агенты — специальная трёхколоночная раскладка
+        if (kind == NavLevelKind.AgentsRoot && !item.IsUp)
+        {
+            bool running = item.Description?.StartsWith("▶") == true;
+            var afg = isCursor ? R.CurFg : (running ? ConsoleColor.Green : ConsoleColor.DarkGray);
+            var abg = isCursor ? R.CurBg : R.PanelBg;
+            const int nameW = 40;
+            const int verW  = 12;
+            R.BoxRow(row,
+                R.Fit($" ► {item.Name}", nameW)
+                + R.Fit(item.PathType ?? "", verW)
+                + R.Fit(item.Description ?? "", InnerW - nameW - verW),
+                afg, abg);
+            return;
+        }
+
         ConsoleColor fg, bg;
 
         if (isCursor)
@@ -1627,6 +1996,15 @@ public class FarApp
             return;
         }
 
+        if (lvl.Kind == NavLevelKind.AgentsRoot)
+        {
+            int cnt     = _agents.Entries.Count;
+            int running = _agents.Entries.Count(e => e.IsRunning);
+            var agentInfo = $"  {cnt} агент(а)  │  Запущено: {running}  │  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [F8] Удалить";
+            R.BoxRow(InfoRow, agentInfo, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         var items   = lvl.Items.Where(i => !i.IsUp).ToList();
         long total  = items.Sum(i => (long)i.SizeBytes);
         int selCnt  = items.Count(i => i.Paths.Any(p => _sel.Contains(p)));
@@ -1669,11 +2047,14 @@ public class FarApp
         bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
 
         bool isLicenses = kind == NavLevelKind.LicensesRoot;
+        bool isAgents   = kind == NavLevelKind.AgentsRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
             : isLicenses
             ? $"[Enter] Инфо  [A] Активация  [V] Проверить  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
+            : isAgents
+            ? $"[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
               + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";
