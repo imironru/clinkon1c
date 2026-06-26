@@ -17,11 +17,10 @@ class Program
     // CI выставляет AssemblyInformationalVersion из git-тега через -p:Version=X.Y.Z.
     // Локальная сборка без тега возвращает "1.0.0".
     public static readonly string VERSION =
-        typeof(Program).Assembly
-            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion
-            ?.Split('+')[0]   // убираем "+commitsha" суффикс .NET SDK
-        ?? "1.0.0";
+        (typeof(Program).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .FirstOrDefault() as System.Reflection.AssemblyInformationalVersionAttribute)
+            ?.InformationalVersion?.Split('+')[0] ?? "1.0.0";
     private const string GithubApiUrl = "https://api.github.com/repos/iMironRU/Clinkon1C/releases/latest";
 
     /// <summary>Версия с номером сборки: "1.0.0 b26" или просто "1.0.0" если нет build number.</summary>
