@@ -20,6 +20,13 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
       - name: Restore dependencies
         run: dotnet restore src/Clinkon1C.csproj
 
@@ -31,7 +38,8 @@ jobs:
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:AssemblyVersion=1.0.0.${{ github.run_number }}
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:AssemblyVersion=${{ steps.version.outputs.version }}
           -c Release
           -o publish/x64
 
@@ -39,16 +47,10 @@ jobs:
         run: >
           dotnet publish src/Clinkon1C.csproj
           -f net48
-          -p:AssemblyVersion=1.0.0.${{ github.run_number }}
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:AssemblyVersion=${{ steps.version.outputs.version }}
           -c Release
           -o publish/legacy
-
-      - name: Extract version from tag
-        id: version
-        shell: pwsh
-        run: |
-          $ver = "${{ github.ref_name }}".TrimStart('v')
-          echo "version=$ver" >> $env:GITHUB_OUTPUT
 
       - name: Rename artifacts
         shell: pwsh
