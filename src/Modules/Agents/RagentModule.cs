@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.ServiceProcess;
 using System.Text;
 using System.Text.RegularExpressions;
 using Clinkon1C.Core;
@@ -69,7 +68,6 @@ public class RagentModule
             ImagePath   = img,
         };
 
-        // Извлекаем путь к exe (может быть в кавычках)
         string args;
         if (img.StartsWith("\""))
         {
@@ -119,17 +117,11 @@ public class RagentModule
         return m.Success ? m.Groups[1].Value : def;
     }
 
-    private static string QueryStatus(string key)
-    {
-        try { using var sc = new ServiceController(key); return sc.Status.ToString(); }
-        catch { return "Unknown"; }
-    }
-
     // ── Поиск установленных версий 1С ─────────────────────────────────────────
 
     public static List<(string Version, string RagentExe)> FindVersions()
     {
-        var result = new List<(string, string)>();
+        var result = new List<(string Version, string RagentExe)>();
         var roots = new[]
         {
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
@@ -153,32 +145,48 @@ public class RagentModule
         return result;
     }
 
-    // ── Управление службой ────────────────────────────────────────────────────
+    // ── Управление службой (Win32, без System.ServiceProcess) ─────────────────
 
     public string? StartService(string key)
     {
+        var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+        if (hScm == IntPtr.Zero) return $"OpenSCManager: {Marshal.GetLastWin32Error()}";
         try
         {
-            using var sc = new ServiceController(key);
-            if (sc.Status == ServiceControllerStatus.Running) return null;
-            sc.Start();
-            sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20));
-            return null;
+            var hSvc = OpenService(hScm, key, SERVICE_START | SERVICE_QUERY_STATUS);
+            if (hSvc == IntPtr.Zero) return $"Служба не найдена: {key}";
+            try
+            {
+                if (!QueryServiceStatus(hSvc, out var st)) return null;
+                if (st.dwCurrentState == SERVICE_RUNNING) return null;
+                if (!Win32StartService(hSvc, 0, null))
+                    return $"StartService: {Marshal.GetLastWin32Error()}";
+                return WaitForState(hSvc, SERVICE_RUNNING, 20_000);
+            }
+            finally { CloseServiceHandle(hSvc); }
         }
-        catch (Exception ex) { return ex.Message; }
+        finally { CloseServiceHandle(hScm); }
     }
 
     public string? StopService(string key)
     {
+        var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+        if (hScm == IntPtr.Zero) return $"OpenSCManager: {Marshal.GetLastWin32Error()}";
         try
         {
-            using var sc = new ServiceController(key);
-            if (sc.Status == ServiceControllerStatus.Stopped) return null;
-            sc.Stop();
-            sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
-            return null;
+            var hSvc = OpenService(hScm, key, SERVICE_STOP | SERVICE_QUERY_STATUS);
+            if (hSvc == IntPtr.Zero) return null; // уже удалена или не найдена
+            try
+            {
+                if (!QueryServiceStatus(hSvc, out var st)) return null;
+                if (st.dwCurrentState == SERVICE_STOPPED) return null;
+                if (!ControlService(hSvc, SERVICE_CONTROL_STOP, out _))
+                    return $"ControlService: {Marshal.GetLastWin32Error()}";
+                return WaitForState(hSvc, SERVICE_STOPPED, 20_000);
+            }
+            finally { CloseServiceHandle(hSvc); }
         }
-        catch (Exception ex) { return ex.Message; }
+        finally { CloseServiceHandle(hScm); }
     }
 
     public string? RestartService(string key)
@@ -188,13 +196,45 @@ public class RagentModule
         return StartService(key);
     }
 
+    private static string QueryStatus(string key)
+    {
+        var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+        if (hScm == IntPtr.Zero) return "Unknown";
+        try
+        {
+            var hSvc = OpenService(hScm, key, SERVICE_QUERY_STATUS);
+            if (hSvc == IntPtr.Zero) return "Unknown";
+            try
+            {
+                if (!QueryServiceStatus(hSvc, out var st)) return "Unknown";
+                return st.dwCurrentState switch
+                {
+                    SERVICE_RUNNING       => "Running",
+                    SERVICE_STOPPED       => "Stopped",
+                    SERVICE_START_PENDING => "StartPending",
+                    SERVICE_STOP_PENDING  => "StopPending",
+                    _                     => $"State_{st.dwCurrentState}",
+                };
+            }
+            finally { CloseServiceHandle(hSvc); }
+        }
+        finally { CloseServiceHandle(hScm); }
+    }
+
+    private static string? WaitForState(IntPtr hSvc, uint target, int timeoutMs)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (!QueryServiceStatus(hSvc, out var st)) break;
+            if (st.dwCurrentState == target) return null;
+            Thread.Sleep(250);
+        }
+        return "Таймаут ожидания состояния службы";
+    }
+
     // ── Переключение отладки ──────────────────────────────────────────────────
 
-    /// <summary>
-    /// Меняет режим отладки через реестр (ImagePath + DisplayName).
-    /// protocol=null — выключить отладку.
-    /// Не перезапускает службу — это задача вызывающего кода.
-    /// </summary>
     public string? SetDebug(RagentEntry entry, string? protocol)
     {
         try
@@ -290,7 +330,7 @@ public class RagentModule
         }
     }
 
-    // ── Win32 SCM (create / delete без sc.exe) ────────────────────────────────
+    // ── Win32 SCM P/Invoke ────────────────────────────────────────────────────
 
     private const uint SC_MANAGER_ALL_ACCESS     = 0xF003F;
     private const uint SERVICE_WIN32_OWN_PROCESS = 0x00000010;
@@ -298,6 +338,26 @@ public class RagentModule
     private const uint SERVICE_ERROR_NORMAL      = 0x00000001;
     private const uint SERVICE_ALL_ACCESS        = 0xF01FF;
     private const uint DELETE                    = 0x00010000;
+    private const uint SERVICE_QUERY_STATUS      = 0x0004;
+    private const uint SERVICE_START             = 0x0010;
+    private const uint SERVICE_STOP              = 0x0020;
+    private const uint SERVICE_CONTROL_STOP      = 0x00000001;
+    private const uint SERVICE_STOPPED           = 0x00000001;
+    private const uint SERVICE_START_PENDING     = 0x00000002;
+    private const uint SERVICE_STOP_PENDING      = 0x00000003;
+    private const uint SERVICE_RUNNING           = 0x00000004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SERVICE_STATUS
+    {
+        public uint dwServiceType;
+        public uint dwCurrentState;
+        public uint dwControlsAccepted;
+        public uint dwWin32ExitCode;
+        public uint dwServiceSpecificExitCode;
+        public uint dwCheckPoint;
+        public uint dwWaitHint;
+    }
 
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr OpenSCManager(string? machine, string? db, uint access);
@@ -313,6 +373,15 @@ public class RagentModule
     private static extern IntPtr OpenService(IntPtr hScm, string name, uint access);
 
     [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool QueryServiceStatus(IntPtr hSvc, out SERVICE_STATUS status);
+
+    [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "StartServiceW", CharSet = CharSet.Unicode)]
+    private static extern bool Win32StartService(IntPtr hSvc, int argc, string[]? argv);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool ControlService(IntPtr hSvc, uint control, out SERVICE_STATUS status);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool DeleteService(IntPtr hSvc);
 
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -322,14 +391,14 @@ public class RagentModule
     {
         var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
         if (hScm == IntPtr.Zero)
-            return $"OpenSCManager: ошибка {Marshal.GetLastWin32Error()}";
+            return $"OpenSCManager: {Marshal.GetLastWin32Error()}";
         try
         {
             var hSvc = CreateService(hScm, key, display, SERVICE_ALL_ACCESS,
                 SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
                 binPath, null, IntPtr.Zero, null, null, null);
             if (hSvc == IntPtr.Zero)
-                return $"CreateService: ошибка {Marshal.GetLastWin32Error()}";
+                return $"CreateService: {Marshal.GetLastWin32Error()}";
             CloseServiceHandle(hSvc);
             return null;
         }
@@ -340,16 +409,16 @@ public class RagentModule
     {
         var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
         if (hScm == IntPtr.Zero)
-            return $"OpenSCManager: ошибка {Marshal.GetLastWin32Error()}";
+            return $"OpenSCManager: {Marshal.GetLastWin32Error()}";
         try
         {
             var hSvc = OpenService(hScm, key, DELETE);
             if (hSvc == IntPtr.Zero)
-                return $"OpenService: ошибка {Marshal.GetLastWin32Error()}";
+                return $"OpenService: {Marshal.GetLastWin32Error()}";
             try
             {
                 return DeleteService(hSvc) ? null
-                    : $"DeleteService: ошибка {Marshal.GetLastWin32Error()}";
+                    : $"DeleteService: {Marshal.GetLastWin32Error()}";
             }
             finally { CloseServiceHandle(hSvc); }
         }
