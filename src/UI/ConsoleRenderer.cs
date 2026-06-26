@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Clinkon1C.UI;
 
 /// <summary>
@@ -79,14 +81,81 @@ internal static class R
     /// <summary>
     /// Пишет в терминал только ячейки, изменившиеся с последнего Flush.
     /// Устраняет мерцание: экран не очищается, обновляются лишь дельты.
+    /// При dirty-флаге (после диалогов) — мгновенно очищает экран и рисует
+    /// построчно цветовыми сегментами, не по одному символу.
     /// </summary>
     public static void Flush()
     {
         Console.CursorVisible = false;
 
+        if (_dirty)
+            FlushFull();
+        else
+            FlushDelta();
+
+        _dirty = false;
+        Array.Clear(_cur, 0, _cur.Length); // очищаем кадр для следующей отрисовки
+    }
+
+    // Полный перерендер: мгновенно очищаем экран, затем рисуем строками.
+    // Число вызовов Console.Write = число цветовых сегментов (не символов).
+    private static void FlushFull()
+    {
+        // Мгновенно закрашиваем диалог (или любой другой контент) в цвет фона.
+        Console.BackgroundColor = PanelBg;
+        Console.ForegroundColor = PanelFg;
+        Console.Clear();
+
+        var sb = new StringBuilder(_w);
+
+        for (int y = 0; y < _h; y++)
+        {
+            try { Console.SetCursorPosition(0, y); } catch { continue; }
+
+            int off = y * _w;
+            ConsoleColor runFg = (ConsoleColor)255;
+            ConsoleColor runBg = (ConsoleColor)255;
+            sb.Clear();
+
+            for (int x = 0; x < _w; x++)
+            {
+                int i = off + x;
+                ref Cell c = ref _cur[i];
+                char ch = c.Ch == '\0' ? ' ' : c.Ch;
+
+                // Новый цветовой сегмент — сбрасываем накопленное
+                if (c.Fg != runFg || c.Bg != runBg)
+                {
+                    if (sb.Length > 0)
+                    {
+                        Console.ForegroundColor = runFg;
+                        Console.BackgroundColor = runBg;
+                        Console.Write(sb.ToString());
+                        sb.Clear();
+                    }
+                    runFg = c.Fg;
+                    runBg = c.Bg;
+                }
+
+                sb.Append(ch);
+                _prev[i] = c; // синхронизируем prev
+            }
+
+            if (sb.Length > 0)
+            {
+                Console.ForegroundColor = runFg;
+                Console.BackgroundColor = runBg;
+                Console.Write(sb.ToString());
+            }
+        }
+    }
+
+    // Дельта-перерендер: пишем только изменившиеся ячейки.
+    private static void FlushDelta()
+    {
         ConsoleColor fg = (ConsoleColor)255;
         ConsoleColor bg = (ConsoleColor)255;
-        int wx = -999, wy = -999; // последняя позиция записи
+        int wx = -999, wy = -999;
 
         for (int y = 0; y < _h; y++)
         {
@@ -97,11 +166,8 @@ internal static class R
                 ref Cell c = ref _cur[i];
                 ref Cell p = ref _prev[i];
 
-                // Пропускаем неизменившиеся ячейки (кроме форсированной перерисовки)
-                if (!_dirty && c.Ch == p.Ch && c.Fg == p.Fg && c.Bg == p.Bg)
-                    continue;
+                if (c.Ch == p.Ch && c.Fg == p.Fg && c.Bg == p.Bg) continue;
 
-                // Перемещаем курсор только если он не там, где нужно
                 if (wx + 1 != x || wy != y)
                 {
                     try { Console.SetCursorPosition(x, y); }
@@ -112,14 +178,11 @@ internal static class R
                 if (c.Bg != bg) { Console.BackgroundColor = c.Bg; bg = c.Bg; }
                 Console.Write(c.Ch == '\0' ? ' ' : c.Ch);
 
-                p  = c; // ячейка синхронизирована
+                p  = c;
                 wx = x;
                 wy = y;
             }
         }
-
-        _dirty = false;
-        Array.Clear(_cur, 0, _cur.Length); // очищаем кадр для следующей отрисовки
     }
 
     // ── Утилиты ──────────────────────────────────────────────────────────────
