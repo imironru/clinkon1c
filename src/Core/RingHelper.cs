@@ -320,16 +320,15 @@ public static class RingHelper
 
         var javaExe = FindJava();
 
+        // chcp 65001 переключает codepage cmd на UTF-8 до запуска ring
         var psi = new ProcessStartInfo
         {
             FileName               = "cmd.exe",
-            Arguments              = $"/c \"{ringCmd}\" license {args} --send-statistics false",
+            Arguments              = $"/c chcp 65001 >nul && \"{ringCmd}\" license {args} --send-statistics false",
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true,
-            // Принудительно UTF-8 через JAVA_TOOL_OPTIONS (ниже),
-            // поэтому кодировка потоков — UTF-8
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding  = Encoding.UTF8,
         };
@@ -346,8 +345,9 @@ public static class RingHelper
         if (File.Exists(ourCfg))
             psi.EnvironmentVariables["E1C_RING_COMMANDS"] = ourCfg;
 
-        // ring.cmd передаёт RING_OPTS напрямую в java — без сторонних сообщений в stderr
-        psi.EnvironmentVariables["RING_OPTS"] = "-Dfile.encoding=UTF-8";
+        // Дополнительно — на случай если ring.cmd пробрасывает эти переменные в java
+        psi.EnvironmentVariables["RING_OPTS"]        = "-Dfile.encoding=UTF-8";
+        psi.EnvironmentVariables["JAVA_TOOL_OPTIONS"] = "-Dfile.encoding=UTF-8";
 
         if (javaExe != null)
         {

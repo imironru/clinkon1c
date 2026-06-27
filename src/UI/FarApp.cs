@@ -1482,8 +1482,58 @@ public class FarApp
     private void DoShowLicenseInfo(string name)
     {
         if (string.IsNullOrEmpty(name) || name == "..") return;
-        var info = _licenses.GetFullInfo(name);
-        ConsoleDialog.ShowText($"Лицензия: {name}", info);
+
+        var sb = new System.Text.StringBuilder();
+
+        // Находим запись с именем файла
+        var entry = _licenses.Entries.FirstOrDefault(x => x.Name == name);
+        var licFileName = entry?.FileName ?? "";
+
+        // Читаем .lic файл напрямую
+        string? licPath = null;
+        ConsoleDialog.ShowProgress("Загрузка информации", _ =>
+        {
+            licPath = LicensesModule.FindLicFileByName(name, licFileName);
+        });
+        R.Invalidate();
+
+        if (licPath != null)
+        {
+            sb.AppendLine($"Файл: {System.IO.Path.GetFileName(licPath)}");
+            sb.AppendLine($"Путь: {licPath}");
+            sb.AppendLine();
+
+            var data = LicensesModule.ReadLicFile(licPath);
+            // Приоритетный порядок полей
+            var order = new[]
+            {
+                "Регистрационный номер", "Тип лицензии", "Номер продукта",
+                "Наименование продукта", "Дата производства", "Срок действия",
+                "Количество пользователей", "Количество пинкодов в группе", "Привязка"
+            };
+            foreach (var key in order)
+                if (data.TryGetValue(key, out var val))
+                    sb.AppendLine($"{key}: {val}");
+            // Остальные поля которых нет в порядке
+            foreach (var kvp in data)
+                if (!order.Contains(kvp.Key))
+                    sb.AppendLine($"{kvp.Key}: {kvp.Value}");
+        }
+        else
+        {
+            // Нет .lic файла — fallback на ring info
+            sb.AppendLine("(файл .lic не найден в стандартных директориях 1С)");
+            sb.AppendLine();
+            string ringInfo = "";
+            ConsoleDialog.ShowProgress("ring license info", _ =>
+            {
+                ringInfo = _licenses.GetFullInfo(name);
+            });
+            R.Invalidate();
+            sb.Append(ringInfo);
+        }
+
+        ConsoleDialog.ShowText($"Лицензия: {name}", sb.ToString());
         R.Invalidate();
     }
 
