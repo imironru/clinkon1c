@@ -153,36 +153,72 @@ class Program
     /// </summary>
     private static bool ShowElevationMenu()
     {
-        Console.WriteLine();
-        Console.WriteLine("  Утилита запущена без прав администратора.");
-        Console.WriteLine("  Часть профилей пользователей будет недоступна.");
-        Console.WriteLine();
-        Console.WriteLine("  [1] Перезапустить от имени администратора (рекомендуется)");
-        Console.WriteLine("  [2] Продолжить без повышения прав");
-        Console.WriteLine("  [3] Выход");
-        Console.Write("> ");
+        Console.CursorVisible = false;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Clear();
+
+        int W = Console.WindowWidth;
+        int H = Console.WindowHeight;
+        int w = Math.Min(W - 4, 66);
+        int h = 11;
+        int x = (W - w) / 2;
+        int y = (H - h) / 2;
+
+        void At(int cx, int cy) { try { Console.SetCursorPosition(cx, cy); } catch { } }
+
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        At(x, y);
+        var tt = "══ Clinkon1C — Права администратора ";
+        Console.Write("╔" + tt + new string('═', w - 2 - tt.Length) + "╗");
+        for (int i = 1; i < h - 1; i++) { At(x, y + i); Console.Write("║" + new string(' ', w - 2) + "║"); }
+        At(x, y + h - 1);
+        Console.Write("╚" + new string('═', w - 2) + "╝");
+
+        At(x + 2, y + 2);
+        Console.Write("  Утилита запущена без прав администратора.");
+        At(x + 2, y + 3);
+        Console.Write("  Часть профилей пользователей будет недоступна.");
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        At(x + 2, y + 5);
+        Console.Write("  [ 1 ]  Перезапустить от имени администратора");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        At(x + 9 + 38, y + 5);
+        Console.Write("  ← рекомендуется");
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        At(x + 2, y + 7);
+        Console.Write("  [ 2 ]  Продолжить без повышения прав");
+        At(x + 2, y + 8);
+        Console.Write("  [ 3 ]  Выход");
+
+        Console.CursorVisible = false;
 
         while (true)
         {
             var k = Console.ReadKey(intercept: true);
             if (k.Key == ConsoleKey.D1 || k.KeyChar == '1')
             {
-                Console.WriteLine();
                 try
                 {
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                     {
-                        FileName       = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName,
-                        Verb           = "runas",
+                        FileName        = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName,
+                        Verb            = "runas",
                         UseShellExecute = true
                     });
                 }
                 catch (Exception ex)
                 {
+                    Console.CursorVisible = true;
+                    Console.BackgroundColor = ConsoleColor.Black;
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Clear();
                     Console.WriteLine($"Не удалось запустить с повышением прав: {ex.Message}");
                     Console.ReadKey(true);
                 }
-                return false; // текущий процесс завершается
+                return false;
             }
             if (k.Key == ConsoleKey.D2 || k.KeyChar == '2')
             {
