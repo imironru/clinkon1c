@@ -42,8 +42,9 @@ internal static class ConsoleDialog
         }
     }
 
-    // ── Текст со скроллом (Dry Run, Help) ────────────────────────────────────
-    public static void ShowText(string title, string text)
+    // ── Текст со скроллом (Dry Run, Help, Info) ──────────────────────────────
+    /// <param name="onSave">Если задан — в подсказке появится [S] Сохранить, нажатие вызывает callback.</param>
+    public static void ShowText(string title, string text, Action? onSave = null)
     {
         int w   = Math.Min(Console.WindowWidth - 4, 78);
         var raw = text.Replace("\r", "").Split('\n');
@@ -51,13 +52,15 @@ internal static class ConsoleDialog
         int scroll = 0;
         while (true)
         {
-            DrawScroll(title, all, scroll);
+            DrawScroll(title, all, scroll, onSave != null);
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.F10) break;
             if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
             if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 1);
             if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - 10);
             if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 10);
+            if (onSave != null && (k.Key == ConsoleKey.S || k.KeyChar == 's' || k.KeyChar == 'S'))
+                onSave();
         }
     }
 
@@ -90,7 +93,7 @@ internal static class ConsoleDialog
         Console.Write(buttons);
     }
 
-    private static void DrawScroll(string title, string[] lines, int scroll)
+    private static void DrawScroll(string title, string[] lines, int scroll, bool hasSave = false)
     {
         int w      = Math.Min(Console.WindowWidth - 4, 78);
         int innerH = Console.WindowHeight - 6;
@@ -113,7 +116,10 @@ internal static class ConsoleDialog
 
         CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
         Pos(x + 2, y + h - 2);
-        Console.Write(R.Fit("↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть", w - 4));
+        var hint = hasSave
+            ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
+            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть";
+        Console.Write(R.Fit(hint, w - 4));
     }
 
     // ── Мультиселект ────────────────────────────────────────────────────────

@@ -1483,58 +1483,136 @@ public class FarApp
     {
         if (string.IsNullOrEmpty(name) || name == "..") return;
 
-        var sb = new System.Text.StringBuilder();
-
-        // Находим запись с именем файла
-        var entry = _licenses.Entries.FirstOrDefault(x => x.Name == name);
+        var entry      = _licenses.Entries.FirstOrDefault(x => x.Name == name);
         var licFileName = entry?.FileName ?? "";
 
-        // Читаем .lic файл напрямую
-        string? licPath = null;
-        ConsoleDialog.ShowProgress("Загрузка информации", _ =>
+        string? licPath    = null;
+        Dictionary<string, string>? licData = null;
+        string ringInfo    = "";
+
+        ConsoleDialog.ShowProgress("Загрузка информации", upd =>
         {
+            upd("Поиск файла лицензии...");
             licPath = LicensesModule.FindLicFileByName(name, licFileName);
+            if (licPath != null)
+                licData = LicensesModule.ReadLicFile(licPath);
+
+            upd("ring license info...");
+            ringInfo = _licenses.GetFullInfo(name);
         });
         R.Invalidate();
 
-        if (licPath != null)
-        {
-            sb.AppendLine($"Файл: {System.IO.Path.GetFileName(licPath)}");
-            sb.AppendLine($"Путь: {licPath}");
-            sb.AppendLine();
+        int innerW = Math.Min(Console.WindowWidth - 4, 78) - 4;
+        var displaySb = new System.Text.StringBuilder();
+        var saveSb    = new System.Text.StringBuilder();
 
-            var data = LicensesModule.ReadLicFile(licPath);
-            // Приоритетный порядок полей
-            var order = new[]
-            {
-                "Регистрационный номер", "Тип лицензии", "Номер продукта",
-                "Наименование продукта", "Дата производства", "Срок действия",
-                "Количество пользователей", "Количество пинкодов в группе", "Привязка"
-            };
-            foreach (var key in order)
-                if (data.TryGetValue(key, out var val))
-                    sb.AppendLine($"{key}: {val}");
-            // Остальные поля которых нет в порядке
-            foreach (var kvp in data)
-                if (!order.Contains(kvp.Key))
-                    sb.AppendLine($"{kvp.Key}: {kvp.Value}");
+        // ── .lic файл ────────────────────────────────────────────────────────
+        if (licPath != null && licData != null && licData.Count > 0)
+        {
+            var header = $"Файл: {System.IO.Path.GetFileName(licPath)}";
+            var path   = $"Путь: {licPath}";
+            displaySb.AppendLine(header);
+            displaySb.AppendLine(path);
+            displaySb.AppendLine();
+            saveSb.AppendLine(header);
+            saveSb.AppendLine(path);
+            saveSb.AppendLine();
+
+            var table = FormatLicTable(licData, innerW);
+            displaySb.Append(table);
+            saveSb.Append(table);
         }
         else
         {
-            // Нет .lic файла — fallback на ring info
-            sb.AppendLine("(файл .lic не найден в стандартных директориях 1С)");
-            sb.AppendLine();
-            string ringInfo = "";
-            ConsoleDialog.ShowProgress("ring license info", _ =>
-            {
-                ringInfo = _licenses.GetFullInfo(name);
-            });
-            R.Invalidate();
-            sb.Append(ringInfo);
+            displaySb.AppendLine("(файл .lic не найден в стандартных директориях 1С)");
+            saveSb.AppendLine("(файл .lic не найден)");
         }
 
-        ConsoleDialog.ShowText($"Лицензия: {name}", sb.ToString());
+        // ── ring license info (регистрационные данные) ────────────────────────
+        if (!string.IsNullOrWhiteSpace(ringInfo))
+        {
+            displaySb.AppendLine();
+            displaySb.AppendLine(new string('─', Math.Min(innerW, 40)));
+            displaySb.AppendLine(ringInfo);
+            saveSb.AppendLine();
+            saveSb.AppendLine(new string('─', 40));
+            saveSb.AppendLine(ringInfo);
+        }
+
+        var fullSaveText = $"Лицензия: {name}\n\n{saveSb}";
+        var safeName     = new string(name.Where(c => !System.IO.Path.GetInvalidFileNameChars().Contains(c)).ToArray());
+
+        ConsoleDialog.ShowText($"Лицензия: {name}", displaySb.ToString(), () =>
+        {
+            try
+            {
+                var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                var fpath   = System.IO.Path.Combine(desktop, $"license_{safeName}.txt");
+                System.IO.File.WriteAllText(fpath, fullSaveText, System.Text.Encoding.UTF8);
+                ConsoleDialog.ShowText("Сохранено", fpath);
+            }
+            catch (Exception ex)
+            {
+                ConsoleDialog.ShowText("Ошибка сохранения", ex.Message);
+            }
+        });
         R.Invalidate();
+    }
+
+    private static readonly string[] LicFieldOrder = new[]
+    {
+        "Регистрационный номер", "Тип лицензии", "Номер продукта",
+        "Наименование продукта", "Дата производства", "Срок действия",
+        "Количество пользователей", "Количество пинкодов в группе", "Привязка"
+    };
+
+    private static string FormatLicTable(Dictionary<string, string> data, int totalWidth)
+    {
+        var pairs = new List<(string Key, string Val)>();
+        foreach (var k in LicFieldOrder)
+            if (data.TryGetValue(k, out var v)) pairs.Add((k, v));
+        foreach (var kvp in data)
+            if (!LicFieldOrder.Contains(kvp.Key)) pairs.Add((kvp.Key, kvp.Value));
+        if (pairs.Count == 0) return "";
+
+        int keyW = Math.Min(pairs.Max(p => p.Key.Length), 30);
+        int valW = Math.Max(8, totalWidth - keyW - 3); // " : " = 3
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var (key, val) in pairs)
+        {
+            var paddedKey = key.PadRight(keyW);
+            var lines     = WordWrapVal(val, valW);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                sb.AppendLine(i == 0
+                    ? $"{paddedKey} : {lines[i]}"
+                    : $"{new string(' ', keyW + 3)}{lines[i]}");
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string[] WordWrapVal(string text, int width)
+    {
+        if (text.Length <= width) return new[] { text };
+        var result  = new List<string>();
+        var current = new System.Text.StringBuilder();
+        foreach (var word in text.Split(' '))
+        {
+            if (current.Length == 0)
+                current.Append(word.Length <= width ? word : word.Substring(0, width));
+            else if (current.Length + 1 + word.Length <= width)
+                current.Append(' ').Append(word);
+            else
+            {
+                result.Add(current.ToString());
+                current.Clear();
+                current.Append(word.Length <= width ? word : word.Substring(0, width));
+            }
+        }
+        if (current.Length > 0) result.Add(current.ToString());
+        return result.ToArray();
     }
 
     private void DoValidateLicense()
