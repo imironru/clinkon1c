@@ -3,6 +3,7 @@ using Clinkon1C.Core;
 using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Configs;
 using Clinkon1C.Modules.Emulators;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
@@ -28,7 +29,8 @@ internal enum NavLevelKind
     AgentsRoot,      // список служб ragent
     ProcessesRoot,   // список запущенных процессов 1С
     WebRoot,         // список веб-публикаций 1С (Apache)
-    EmulatorsRoot    // аудит эмуляторов HASP
+    EmulatorsRoot,   // аудит эмуляторов HASP
+    ConfigsRoot      // конфигурационные файлы платформы
 }
 
 internal class NavItem
@@ -77,6 +79,7 @@ public class FarApp
     private readonly ProcessesModule _processes;
     private readonly WebModule       _web;
     private readonly EmulatorModule  _emulators;
+    private readonly ConfigsModule   _configs;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -107,7 +110,8 @@ public class FarApp
     // ── Запуск ───────────────────────────────────────────────────────────────
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
                   LicensesModule licenses, RagentModule agents, ProcessesModule processes,
-                  WebModule web, EmulatorModule emulators, string? updateNotice = null)
+                  WebModule web, EmulatorModule emulators, ConfigsModule configs,
+                  string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
@@ -117,6 +121,7 @@ public class FarApp
         _processes    = processes;
         _web          = web;
         _emulators    = emulators;
+        _configs      = configs;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -374,6 +379,15 @@ public class FarApp
                     ModuleId    = "emulators",
                     Paths       = new List<string>(),
                     Description = "аудит лицензий"
+                },
+                new NavItem
+                {
+                    Name        = "Конфиги платформы",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "configs",
+                    Paths       = new List<string>(),
+                    Description = "conf.cfg, logcfg.xml ..."
                 }
             }
         };
@@ -975,6 +989,31 @@ public class FarApp
         };
     }
 
+    private NavLevel MakeConfigsLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+        foreach (var f in _configs.Files)
+        {
+            items.Add(new NavItem
+            {
+                Name        = f.DisplayName,
+                Description = f.Found ? f.Path : "не найден",
+                ShowDescCol = true,
+                CanEnter    = f.CanEdit,
+                IsDead      = !f.Found,
+                BaseName    = f.Id,
+                Paths       = f.Found ? new List<string> { f.Path! } : new List<string>()
+            });
+        }
+        int found = _configs.Files.Count(f => f.Found);
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.ConfigsRoot,
+            Title = $"Конфиги платформы  [{found} найдено из {_configs.Files.Count}]",
+            Items = items
+        };
+    }
+
     private static string StatusDisplay(string status) => status switch
     {
         "Running"      => "▶ Работает",
@@ -1022,6 +1061,8 @@ public class FarApp
                     EnterWeb();
                 else if (item.ModuleId == "emulators")
                     EnterEmulators();
+                else if (item.ModuleId == "configs")
+                    EnterConfigs();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -1093,6 +1134,10 @@ public class FarApp
             case NavLevelKind.EmulatorsRoot:
                 DoEmulatorInfo(item.BaseName);
                 break;
+
+            case NavLevelKind.ConfigsRoot:
+                DoEditConfig(item.BaseName);
+                break;
         }
     }
 
@@ -1125,6 +1170,7 @@ public class FarApp
             case NavLevelKind.ProcessesRoot: rebuilt = MakeProcessesLevel(); break;
             case NavLevelKind.WebRoot:       rebuilt = MakeWebLevel();       break;
             case NavLevelKind.EmulatorsRoot: rebuilt = MakeEmulatorsLevel(); break;
+            case NavLevelKind.ConfigsRoot:   rebuilt = MakeConfigsLevel();   break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -1272,6 +1318,12 @@ public class FarApp
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.EmulatorsRoot)
                 {
                     ConsoleDialog.ShowProgress("Сканирование...", _ => _emulators.Scan());
+                    R.Invalidate();
+                    RebuildCurrentLevel();
+                }
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.ConfigsRoot)
+                {
+                    ConsoleDialog.ShowProgress("Обновление...", _ => _configs.Refresh());
                     R.Invalidate();
                     RebuildCurrentLevel();
                 }
@@ -1910,6 +1962,13 @@ public class FarApp
         _nav.Push(MakeEmulatorsLevel());
     }
 
+    private void EnterConfigs()
+    {
+        ConsoleDialog.ShowProgress("Поиск конфигурационных файлов...", _ => _configs.Refresh());
+        R.Invalidate();
+        _nav.Push(MakeConfigsLevel());
+    }
+
     private void DoWebInfo(string? alias)
     {
         if (string.IsNullOrEmpty(alias)) return;
@@ -2255,6 +2314,87 @@ public class FarApp
         R.Invalidate();
 
         ConsoleDialog.ShowProgress("Повторное сканирование...", _ => _emulators.Scan());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    // ── Конфигурационные файлы ────────────────────────────────────────────────
+
+    private void DoEditConfig(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        var cf = _configs.Files.FirstOrDefault(f => f.Id == id);
+        if (cf == null || !cf.CanEdit) return;
+
+        switch (id)
+        {
+            case "conf.cfg":
+                DoEditConfCfg(cf);
+                break;
+            // Phase 2: case "logcfg.xml": DoEditLogcfg(cf); break;
+            // Phase 2: case "nethasp.ini": DoEditNethasp(cf); break;
+        }
+    }
+
+    private void DoEditConfCfg(ConfigFile cf)
+    {
+        // Если файл не найден — предлагаем создать
+        string path = cf.Path ?? ConfigsModule.DefaultConfCfgPath();
+        if (cf.Path == null)
+        {
+            bool create = ConsoleDialog.Confirm("conf.cfg не найден",
+                $"Файл не найден. Создать?\n\n{path}");
+            R.Invalidate();
+            if (!create) return;
+        }
+
+        // Читаем текущие значения
+        var current = ConfigsModule.ReadKeyValue(path);
+        string G(string key, string def = "") =>
+            current.TryGetValue(key, out var v) ? v : def;
+
+        var fields = new (string Key, string Label)[]
+        {
+            ("SystemLanguage",                    "Язык (RU/EN/System)"),
+            ("DBFormatVersion",                   "Формат файловой БД"),
+            ("UseHwLicenses",                     "HASP-ключи (0/1)"),
+            ("DisableUnsafeActionProtection",     "Откл. защиты (regex)"),
+            ("PublishDistributiveLocationWindows32", "Дистрибутив Win32"),
+            ("PublishDistributiveLocationWindows64", "Дистрибутив Win64"),
+        };
+
+        var defaults = new Dictionary<string, string>
+        {
+            ["SystemLanguage"]                        = G("SystemLanguage", "RU"),
+            ["DBFormatVersion"]                       = G("DBFormatVersion", "8.3.8"),
+            ["UseHwLicenses"]                         = G("UseHwLicenses", "1"),
+            ["DisableUnsafeActionProtection"]         = G("DisableUnsafeActionProtection"),
+            ["PublishDistributiveLocationWindows32"]  = G("PublishDistributiveLocationWindows32"),
+            ["PublishDistributiveLocationWindows64"]  = G("PublishDistributiveLocationWindows64"),
+        };
+
+        var result = ConsoleDialog.Form("conf.cfg", fields, defaults);
+        R.Invalidate();
+        if (result == null) return;
+
+        // Сохраняем только заполненные поля (или очищаем если пустые)
+        string? err = null;
+        ConsoleDialog.ShowProgress("Сохранение conf.cfg...", _ =>
+            err = ConfigsModule.WriteKeyValue(path, result));
+        R.Invalidate();
+
+        if (err != null)
+        {
+            ConsoleDialog.ShowText("Ошибка", err);
+            R.Invalidate();
+            return;
+        }
+
+        ConsoleDialog.ShowText("Готово", $"Сохранено:\n{path}\n\nИзменения вступят в силу при следующем запуске 1С.");
+        R.Invalidate();
+
+        // Обновляем путь если файл был создан
+        ConsoleDialog.ShowProgress("Обновление...", _ => _configs.Refresh());
         R.Invalidate();
         RebuildCurrentLevel();
     }
@@ -2836,6 +2976,26 @@ public class FarApp
             return;
         }
 
+        // Конфиги — двухколоночная раскладка: имя файла + путь
+        if (kind == NavLevelKind.ConfigsRoot && !item.IsUp)
+        {
+            var cfgFg = isCursor ? R.CurFg
+                : (!item.Found ? ConsoleColor.DarkGray
+                : item.CanEnter ? ConsoleColor.Cyan
+                : ConsoleColor.DarkCyan);
+            var cfgBg = isCursor ? R.CurBg : R.PanelBg;
+            const int nameW = 22;
+            var pathStr = item.Description ?? "";
+            // для найденных — сокращаем путь
+            if (item.Found && pathStr.Length > InnerW - nameW - 1)
+                pathStr = "…" + pathStr.Substring(pathStr.Length - (InnerW - nameW - 2));
+            R.BoxRow(row,
+                R.Fit($" {(item.CanEnter ? "►" : " ")} {item.Name}", nameW)
+                + R.Fit(pathStr, InnerW - nameW),
+                cfgFg, cfgBg);
+            return;
+        }
+
         // Эмуляторы HASP — двухколоночная раскладка с красной подсветкой
         if (kind == NavLevelKind.EmulatorsRoot && !item.IsUp && item.BaseName != null)
         {
@@ -2980,6 +3140,15 @@ public class FarApp
             return;
         }
 
+        if (lvl.Kind == NavLevelKind.ConfigsRoot)
+        {
+            int found = _configs.Files.Count(f => f.Found);
+            int total = _configs.Files.Count;
+            var cfgInfo = $"  {found} из {total} файлов найдено  │  [Enter] Редактировать  │  [F5] Обновить";
+            R.BoxRow(InfoRow, cfgInfo, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         var items   = lvl.Items.Where(i => !i.IsUp).ToList();
         long total  = items.Sum(i => (long)i.SizeBytes);
         int selCnt  = items.Count(i => i.Paths.Any(p => _sel.Contains(p)));
@@ -3026,6 +3195,7 @@ public class FarApp
         bool isProcesses = kind == NavLevelKind.ProcessesRoot;
         bool isWeb       = kind == NavLevelKind.WebRoot;
         bool isEmulators = kind == NavLevelKind.EmulatorsRoot;
+        bool isConfigs   = kind == NavLevelKind.ConfigsRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
@@ -3039,6 +3209,8 @@ public class FarApp
             ? $"[Enter] Инфо  [E] Редактировать  [J] JWT  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить  [F10] Выход  {ver}"
             : isEmulators
             ? $"[Enter] Детали  [D]/[F8] Удалить  [F5] Повторить скан  [F10] Выход  {ver}"
+            : isConfigs
+            ? $"[Enter] Редактировать  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
               + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";

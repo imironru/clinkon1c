@@ -6,6 +6,7 @@ using Clinkon1C.Core;
 using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Configs;
 using Clinkon1C.Modules.Emulators;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
@@ -138,7 +139,8 @@ class Program
             var processes = new ProcessesModule();
             var web       = new WebModule();
             var emulators = new EmulatorModule();
-            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, updateNotice).Run();
+            var configs   = new ConfigsModule();
+            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, updateNotice).Run();
         }
         finally
         {
