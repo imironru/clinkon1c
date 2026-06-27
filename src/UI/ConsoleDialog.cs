@@ -158,9 +158,13 @@ internal static class ConsoleDialog
 
     // ── Мультиселект ────────────────────────────────────────────────────────
     /// <summary>Диалог с чекбоксами. Возвращает индексы отмеченных элементов.</summary>
-    public static List<int> MultiSelect(string title, string[] items)
+    public static List<int> MultiSelect(string title, string[] items,
+        IEnumerable<int>? preselected = null)
     {
         var marked  = new bool[items.Length];
+        if (preselected != null)
+            foreach (var i in preselected)
+                if (i >= 0 && i < items.Length) marked[i] = true;
         int cursor  = 0;
         int scroll  = 0;
         int visible = Math.Max(1, Math.Min(items.Length, Console.WindowHeight - 8));

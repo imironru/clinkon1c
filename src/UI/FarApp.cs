@@ -2328,11 +2328,8 @@ public class FarApp
 
         switch (id)
         {
-            case "conf.cfg":
-                DoEditConfCfg(cf);
-                break;
-            // Phase 2: case "logcfg.xml": DoEditLogcfg(cf); break;
-            // Phase 2: case "nethasp.ini": DoEditNethasp(cf); break;
+            case "conf.cfg":    DoEditConfCfg(cf);  break;
+            case "logcfg.xml":  DoEditLogcfg(cf);   break;
         }
     }
 
@@ -2394,6 +2391,116 @@ public class FarApp
         R.Invalidate();
 
         // Обновляем путь если файл был создан
+        ConsoleDialog.ShowProgress("Обновление...", _ => _configs.Refresh());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    private void DoEditLogcfg(ConfigFile cf)
+    {
+        string path = cf.Path ?? ConfigsModule.DefaultLogcfgPath();
+        if (cf.Path == null)
+        {
+            bool create = ConsoleDialog.Confirm("logcfg.xml не найден",
+                $"Технологический журнал не настроен.\nСоздать конфигурацию?\n\n{path}");
+            R.Invalidate();
+            if (!create) return;
+        }
+
+        // Читаем существующий файл или создаём дефолт
+        var s = cf.Path != null
+            ? ConfigsModule.ParseLogcfg(cf.Path)
+            : new ConfigsModule.LogcfgSettings
+              {
+                  LogPath   = @"C:\v8logs",
+                  History   = "24",
+                  Format    = "text",
+                  DumpPath  = @"C:\v8dumps",
+                  DumpType  = "3",
+                  SystemLevel = "ERROR"
+              };
+
+        // ── Шаг 1: Основные параметры ────────────────────────────────────────
+        var fields = new (string Key, string Label)[]
+        {
+            ("LogPath",       "Путь к логам"),
+            ("History",       "Хранить (часов)"),
+            ("Format",        "Формат (text/json)"),
+            ("MinDurationMs", "Мин. длит. (мс, 0=все)"),
+            ("DumpPath",      "Путь к дампам"),
+            ("DumpType",      "Тип дампа (1/2/3)"),
+            ("SystemLevel",   "Уровень системы"),
+        };
+        var defaults = new Dictionary<string, string>
+        {
+            ["LogPath"]        = s.LogPath,
+            ["History"]        = s.History,
+            ["Format"]         = s.Format,
+            ["MinDurationMs"]  = s.MinDurationMs,
+            ["DumpPath"]       = s.DumpPath,
+            ["DumpType"]       = s.DumpType,
+            ["SystemLevel"]    = s.SystemLevel,
+        };
+
+        var formResult = ConsoleDialog.Form("logcfg.xml — Основные параметры", fields, defaults);
+        R.Invalidate();
+        if (formResult == null) return;
+
+        s.LogPath       = formResult["LogPath"];
+        s.History       = string.IsNullOrWhiteSpace(formResult["History"]) ? "24" : formResult["History"];
+        s.Format        = string.IsNullOrWhiteSpace(formResult["Format"])  ? "text" : formResult["Format"].ToLower();
+        s.MinDurationMs = formResult["MinDurationMs"];
+        s.DumpPath      = formResult["DumpPath"];
+        s.DumpType      = string.IsNullOrWhiteSpace(formResult["DumpType"]) ? "3" : formResult["DumpType"];
+        s.SystemLevel   = string.IsNullOrWhiteSpace(formResult["SystemLevel"]) ? "ERROR" : formResult["SystemLevel"].ToUpper();
+
+        // ── Шаг 2: Выбор событий ─────────────────────────────────────────────
+        var evtItems = ConfigsModule.KnownEvents
+            .Select(e => $"{e.Name,-12} — {e.Desc}")
+            .ToArray();
+        var preselected = Enumerable.Range(0, ConfigsModule.KnownEvents.Length)
+            .Where(i => s.Events.Contains(ConfigsModule.KnownEvents[i].Name, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        // Временно выставляем preselect через MultiSelect с отмеченными по умолчанию
+        var selectedIdx = ConsoleDialog.MultiSelect(
+            "logcfg.xml — События ТЖ (Пробел=выбрать, A=все)", evtItems, preselected);
+        R.Invalidate();
+
+        s.Events = selectedIdx
+            .Select(i => ConfigsModule.KnownEvents[i].Name)
+            .ToArray();
+
+        // ── Сохранение ────────────────────────────────────────────────────────
+        string? err = null;
+        ConsoleDialog.ShowProgress("Сохранение logcfg.xml...", _ =>
+            err = ConfigsModule.SaveLogcfg(path, s));
+        R.Invalidate();
+
+        if (err != null)
+        {
+            ConsoleDialog.ShowText("Ошибка", err);
+            R.Invalidate();
+            return;
+        }
+
+        var summary = new System.Text.StringBuilder();
+        summary.AppendLine($"Сохранено: {path}");
+        summary.AppendLine();
+        if (!string.IsNullOrEmpty(s.LogPath))
+            summary.AppendLine($"Логи:    {s.LogPath}  (хранить {s.History}ч, {s.Format})");
+        if (s.Events.Length > 0)
+            summary.AppendLine($"События: {string.Join(", ", s.Events)}");
+        if (!string.IsNullOrWhiteSpace(s.MinDurationMs) && s.MinDurationMs != "0")
+            summary.AppendLine($"Длит.:   >{s.MinDurationMs} мс");
+        if (!string.IsNullOrEmpty(s.DumpPath))
+            summary.AppendLine($"Дампы:   {s.DumpPath}  (тип {s.DumpType})");
+        summary.AppendLine();
+        summary.AppendLine("Перезапуск 1С не требуется — файл читается при старте каждого процесса.");
+
+        ConsoleDialog.ShowText("Готово", summary.ToString().TrimEnd());
+        R.Invalidate();
+
         ConsoleDialog.ShowProgress("Обновление...", _ => _configs.Refresh());
         R.Invalidate();
         RebuildCurrentLevel();
