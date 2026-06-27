@@ -72,8 +72,9 @@ public class LicensesModule
             string fileName = "";
 
             // Формат ring: "Лицензия: NAME (имя файла: "FILE.lic")"
+            // [^(]+ — жадный, но не захватывает '(' чтобы имя не слилось с блоком filename
             var m = Regex.Match(t,
-                @"(?:Лицензия|License)\s*:\s*(.+?)(?:\s+\((?:имя файла|file name)\s*:\s*[""']?([^""')]+)[""']?\))?$",
+                @"(?:Лицензия|License)\s*:\s*([^(]+?)(?:\s*\((?:имя файла|file name)\s*:\s*[""']?([^""')]+)[""']?\))?$",
                 RegexOptions.IgnoreCase);
             if (m.Success)
             {
