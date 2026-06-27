@@ -265,7 +265,12 @@ internal static class ConsoleDialog
             Pos(x + 2, y + h - 2);
             Console.Write(R.Fit("[Enter] Сохранить    [Esc] Отмена", w - 4));
 
+            // Курсор в конец введённого текста
+            Pos(x + 2 + 2 + display.Length, inputY); // 2 = "> "
+            Console.CursorVisible = true;
+
             var k = Console.ReadKey(true);
+            Console.CursorVisible = false;
             if (k.Key == ConsoleKey.Enter)  return input.ToString();
             if (k.Key == ConsoleKey.Escape) return null;
             if (k.Key == ConsoleKey.Backspace && input.Length > 0)
@@ -349,15 +354,20 @@ internal static class ConsoleDialog
             Pos(x + 2, y + h - 2);
             Console.Write(R.Fit("[↑↓ Tab] Поле   [Enter] Подтвердить   [Esc] Отмена", w - 4));
 
+            // Позиционируем системный курсор в конец текста активного поля
+            {
+                var activeVal = values[cursor];
+                if (activeVal.Length > inputW) activeVal = activeVal.Substring(activeVal.Length - inputW);
+                Pos(x + 2 + labelW + activeVal.Length, y + 2 + cursor * 2);
+                Console.CursorVisible = true;
+            }
+
             var k = Console.ReadKey(true);
+            Console.CursorVisible = false;
             if (k.Key == ConsoleKey.Escape) return null;
             if (k.Key == ConsoleKey.Enter)
-            {
-                var result = new Dictionary<string, string>();
-                for (int i = 0; i < fields.Length; i++)
-                    result[fields[i].Key] = values[i];
-                return result;
-            }
+                return fields.Select((f, i) => (f.Key, values[i]))
+                             .ToDictionary(t => t.Key, t => t.Item2);
             bool shiftTab = k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Shift) != 0;
             if (k.Key == ConsoleKey.UpArrow || shiftTab)
                 cursor = (cursor - 1 + fields.Length) % fields.Length;
