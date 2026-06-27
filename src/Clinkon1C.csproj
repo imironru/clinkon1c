@@ -36,6 +36,7 @@
   <!-- System.Management (WMI): для net8 — NuGet, для net48 — в GAC -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
     <PackageReference Include="System.Management" Version="8.*" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.*" />
   </ItemGroup>
 
   <ItemGroup>

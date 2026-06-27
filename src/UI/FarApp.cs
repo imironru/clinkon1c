@@ -6,6 +6,7 @@ using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
+using Clinkon1C.Modules.Web;
 
 namespace Clinkon1C.UI;
 
@@ -24,7 +25,8 @@ internal enum NavLevelKind
     BasesRoot,       // список информационных баз
     LicensesRoot,    // список программных лицензий
     AgentsRoot,      // список служб ragent
-    ProcessesRoot    // список запущенных процессов 1С
+    ProcessesRoot,   // список запущенных процессов 1С
+    WebRoot          // список веб-публикаций 1С (Apache)
 }
 
 internal class NavItem
@@ -71,6 +73,7 @@ public class FarApp
     private readonly LicensesModule  _licenses;
     private readonly RagentModule    _agents;
     private readonly ProcessesModule _processes;
+    private readonly WebModule       _web;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -101,7 +104,7 @@ public class FarApp
     // ── Запуск ───────────────────────────────────────────────────────────────
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
                   LicensesModule licenses, RagentModule agents, ProcessesModule processes,
-                  string? updateNotice = null)
+                  WebModule web, string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
@@ -109,6 +112,7 @@ public class FarApp
         _licenses     = licenses;
         _agents       = agents;
         _processes    = processes;
+        _web          = web;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -348,6 +352,15 @@ public class FarApp
                     ModuleId    = "processes",
                     Paths       = new List<string>(),
                     Description = "1С клиенты"
+                },
+                new NavItem
+                {
+                    Name        = "Веб",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "web",
+                    Paths       = new List<string>(),
+                    Description = "Apache / публикации"
                 }
             }
         };
@@ -868,6 +881,49 @@ public class FarApp
         };
     }
 
+    private NavLevel MakeWebLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        if (!_web.ApacheFound)
+        {
+            items.Add(new NavItem
+            {
+                Name        = "(Apache не обнаружен)",
+                Description = "Нет конфигурационного файла",
+                IsDead      = true,
+                CanEnter    = false,
+            });
+        }
+        else
+        {
+            foreach (var e in _web.Entries)
+            {
+                items.Add(new NavItem
+                {
+                    Name        = e.Alias,
+                    BaseName    = e.Alias,         // ключ для lookup
+                    PathType    = e.DbType,        // Файл / Сервер
+                    Description = e.DbName,        // имя базы
+                    UserName    = e.Version,        // версия 1С
+                    IsDead      = !e.Enabled,       // серый цвет для выключенных
+                    CanEnter    = true,
+                });
+            }
+        }
+
+        var apacheSt = !_web.ApacheFound
+            ? "не найден"
+            : (_web.ApacheRunning ? "▶ Работает" : "■ Остановлен");
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.WebRoot,
+            Title = $"Веб-публикации 1С  [{_web.Entries.Count}]  Apache: {apacheSt}",
+            Items = items
+        };
+    }
+
     private static string StatusDisplay(string status) => status switch
     {
         "Running"      => "▶ Работает",
@@ -911,6 +967,8 @@ public class FarApp
                     EnterAgents();
                 else if (item.ModuleId == "processes")
                     EnterProcesses();
+                else if (item.ModuleId == "web")
+                    EnterWeb();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -974,6 +1032,10 @@ public class FarApp
             case NavLevelKind.ProcessesRoot:
                 DoProcessInfo(item.BaseName);
                 break;
+
+            case NavLevelKind.WebRoot:
+                if (!item.IsDead) DoWebInfo(item.BaseName);
+                break;
         }
     }
 
@@ -1004,6 +1066,7 @@ public class FarApp
             case NavLevelKind.LicensesRoot:  rebuilt = MakeLicensesLevel();  break;
             case NavLevelKind.AgentsRoot:    rebuilt = MakeAgentsLevel();    break;
             case NavLevelKind.ProcessesRoot: rebuilt = MakeProcessesLevel(); break;
+            case NavLevelKind.WebRoot:       rebuilt = MakeWebLevel();       break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -1116,6 +1179,8 @@ public class FarApp
                     DoAgentDelete();
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.ProcessesRoot)
                     DoProcessKill();
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
+                    DoWebUnpublish();
                 else
                     DoDelete();
                 break;
@@ -1135,6 +1200,12 @@ public class FarApp
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.ProcessesRoot)
                 {
                     ConsoleDialog.ShowProgress("Обновление...", _ => _processes.Refresh());
+                    R.Invalidate();
+                    RebuildCurrentLevel();
+                }
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
+                {
+                    ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
                     R.Invalidate();
                     RebuildCurrentLevel();
                 }
@@ -1176,6 +1247,13 @@ public class FarApp
                 {
                     if      (ch == 'k') DoProcessKill();
                     else if (ch == 'a') DoProcessKillAll();
+                }
+                else if (kind2 == NavLevelKind.WebRoot)
+                {
+                    if      (ch == 'p') DoWebPublish();
+                    else if (ch == 's') DoWebApacheOp("start");
+                    else if (ch == 't') DoWebApacheOp("stop");
+                    else if (ch == 'r') DoWebApacheOp("restart");
                 }
                 else if (ch == 's')
                 {
@@ -1744,6 +1822,193 @@ public class FarApp
         _nav.Push(MakeProcessesLevel());
     }
 
+    // ── Действия с веб-публикациями ───────────────────────────────────────────
+
+    private void EnterWeb()
+    {
+        ConsoleDialog.ShowProgress("Поиск Apache и публикаций...", _ => _web.Refresh());
+        R.Invalidate();
+        _nav.Push(MakeWebLevel());
+    }
+
+    private void DoWebInfo(string? alias)
+    {
+        if (string.IsNullOrEmpty(alias)) return;
+        var e = _web.Entries.FirstOrDefault(x => x.Alias == alias);
+        if (e == null) return;
+
+        int innerW = Math.Min(Console.WindowWidth - 4, 78) - 4;
+
+        (string title, string content) GetInfo()
+        {
+            var sb = new System.Text.StringBuilder();
+            var pairs = new List<(string K, string V)>
+            {
+                ("Псевдоним",     e.Alias),
+                ("Тип базы",      e.DbType),
+                ("База",          e.DbName),
+                ("Строка подкл.", e.IbString),
+                ("Статус",        e.Enabled ? "Включено" : "Выключено"),
+                ("Версия 1С",     e.Version),
+                ("VRD файл",      e.VrdPath),
+                ("Конфиг Apache", e.ConfFile),
+            };
+            pairs.RemoveAll(p => string.IsNullOrEmpty(p.V));
+
+            int keyW = Math.Min(pairs.Max(p => p.K.Length), 20);
+            int valW = Math.Max(8, innerW - keyW - 3);
+            foreach (var (k, v) in pairs)
+            {
+                var lines = WordWrapVal(v, valW);
+                for (int i = 0; i < lines.Length; i++)
+                    sb.AppendLine(i == 0
+                        ? $"{k.PadRight(keyW)} : {lines[i]}"
+                        : $"{new string(' ', keyW + 3)}{lines[i]}");
+            }
+
+            var svcName = string.IsNullOrEmpty(_web.ApacheService) ? "" : $" ({_web.ApacheService})";
+            var apacheSt = !_web.ApacheFound ? "не найден"
+                : (_web.ApacheRunning ? "▶ Работает" : "■ Остановлен");
+            sb.AppendLine();
+            sb.AppendLine(new string('─', Math.Min(innerW, 40)));
+            sb.AppendLine($"Apache{svcName}: {apacheSt}");
+
+            return ($"Публикация: {e.Alias}", sb.ToString());
+        }
+
+        ConsoleDialog.ShowTextWithKeys(
+            GetInfo,
+            "[S] Старт  [T] Стоп  [R] Рестарт  Esc — закрыть",
+            (key, _) =>
+            {
+                char ch = char.ToLower((char)key);
+                if      (ch == 's') DoWebApacheOp("start");
+                else if (ch == 't') DoWebApacheOp("stop");
+                else if (ch == 'r') DoWebApacheOp("restart");
+                return true;
+            });
+        R.Invalidate();
+    }
+
+    private void DoWebPublish()
+    {
+        if (!_web.ApacheFound)
+        {
+            ConsoleDialog.ShowText("Ошибка", "Apache не обнаружен на этом компьютере.");
+            R.Invalidate();
+            return;
+        }
+
+        var fields = ConsoleDialog.Form("Новая веб-публикация 1С",
+            new[] { ("alias", "Псевдоним (без /)"), ("ib", "Строка подключения") });
+        R.Invalidate();
+        if (fields == null) return;
+
+        var alias = fields["alias"].Trim();
+        var ib    = fields["ib"].Trim();
+        if (string.IsNullOrEmpty(alias) || string.IsNullOrEmpty(ib)) return;
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Публикация...", _ => { err = _web.Publish(alias, ib); });
+        R.Invalidate();
+
+        if (err != null)
+        {
+            ConsoleDialog.ShowText("Ошибка публикации", err);
+            R.Invalidate();
+            return;
+        }
+
+        bool restart = ConsoleDialog.Confirm("Публикация добавлена",
+            $"/{alias.TrimStart('/')} успешно опубликована.\n\nПерезапустить Apache сейчас?");
+        R.Invalidate();
+        if (restart) DoWebApacheOp("restart");
+
+        ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    private void DoWebUnpublish()
+    {
+        var item = CurrentItem();
+        if (item == null || item.IsUp || string.IsNullOrEmpty(item.BaseName)) return;
+
+        var entry = _web.Entries.FirstOrDefault(e => e.Alias == item.BaseName);
+        if (entry == null) return;
+
+        if (!ConsoleDialog.Confirm("Снять с публикации",
+            $"Снять публикацию {entry.Alias}?\n\nБудут удалены:\n• {entry.ConfFile}\n• {entry.VrdPath}"))
+        {
+            R.Invalidate();
+            return;
+        }
+        R.Invalidate();
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Снятие публикации...", _ => { err = _web.Unpublish(entry); });
+        R.Invalidate();
+
+        if (err != null)
+        {
+            ConsoleDialog.ShowText("Ошибка", err);
+            R.Invalidate();
+            return;
+        }
+
+        bool restart = ConsoleDialog.Confirm("Готово",
+            $"{entry.Alias} снята с публикации.\n\nПерезапустить Apache сейчас?");
+        R.Invalidate();
+        if (restart) DoWebApacheOp("restart");
+
+        ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    private void DoWebApacheOp(string op)
+    {
+        if (!_web.ApacheFound) return;
+
+        var label = op switch
+        {
+            "start"   => "Запуск Apache...",
+            "stop"    => "Остановка Apache...",
+            "restart" => "Перезапуск Apache...",
+            _         => op
+        };
+
+        string? err = null;
+        ConsoleDialog.ShowProgress(label, _ =>
+        {
+            err = op switch
+            {
+                "start"   => _web.StartApache(),
+                "stop"    => _web.StopApache(),
+                "restart" => _web.RestartApache(),
+                _         => null
+            };
+        });
+        R.Invalidate();
+
+        var okMsg = op switch
+        {
+            "start"   => "✓ Apache запущен",
+            "stop"    => "✓ Apache остановлен",
+            "restart" => "✓ Apache перезапущен",
+            _         => "✓ Готово"
+        };
+
+        if (err != null)
+            ConsoleDialog.ShowText("Ошибка Apache", err);
+        else
+            ConsoleDialog.ShowText("Apache", okMsg);
+        R.Invalidate();
+
+        if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
+            RebuildCurrentLevel();
+    }
+
     private void DoProcessInfo(string? pidStr)
     {
         if (pidStr == null || !int.TryParse(pidStr, out var pid)) return;
@@ -2240,6 +2505,19 @@ public class FarApp
             return;
         }
 
+        if (kind == NavLevelKind.WebRoot)
+        {
+            const int aliasW = 22;
+            const int typeW  = 9;
+            const int verW   = 14;
+            var content = R.Fit(" Псевдоним",   aliasW)
+                        + R.Fit("Тип",          typeW)
+                        + R.Fit("База",         InnerW - aliasW - typeW - verW)
+                        + R.Fit("Версия 1С",    verW);
+            R.BoxRow(2, content, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         bool bySize = _cache.SortBy == SortMode.BySize;
         var nameLabel = bySize ? " Имя" : " Имя ▲";
         var sizeLabel = bySize ? "Размер ▼ " : "Размер   ";
@@ -2282,6 +2560,23 @@ public class FarApp
                 + R.Fit(u1cStr,      u1cW)
                 + R.Fit(winStr,      InnerW - pidW - modeW - dbW - u1cW),
                 pfg, pbg);
+            return;
+        }
+
+        // Веб-публикации — четырёхколоночная раскладка
+        if (kind == NavLevelKind.WebRoot && !item.IsUp)
+        {
+            const int aliasW = 22;
+            const int typeW  = 9;
+            const int verW   = 14;
+            var wfg = isCursor ? R.CurFg : (item.IsDead ? ConsoleColor.DarkGray : ConsoleColor.Green);
+            var wbg = isCursor ? R.CurBg : R.PanelBg;
+            R.BoxRow(row,
+                R.Fit($" ► {item.Name}", aliasW)
+                + R.Fit(item.PathType ?? "", typeW)
+                + R.Fit(item.Description ?? "", InnerW - aliasW - typeW - verW)
+                + R.Fit(item.UserName ?? "", verW),
+                wfg, wbg);
             return;
         }
 
@@ -2397,6 +2692,15 @@ public class FarApp
             return;
         }
 
+        if (lvl.Kind == NavLevelKind.WebRoot)
+        {
+            var apacheSt = !_web.ApacheFound ? "не найден"
+                : (_web.ApacheRunning ? "▶ Работает" : "■ Остановлен");
+            var webInfo  = $"  {_web.Entries.Count} публик.  │  Apache: {apacheSt}  │  [Enter] Инфо  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить";
+            R.BoxRow(InfoRow, webInfo, R.HdrFg, R.HdrBg);
+            return;
+        }
+
         var items   = lvl.Items.Where(i => !i.IsUp).ToList();
         long total  = items.Sum(i => (long)i.SizeBytes);
         int selCnt  = items.Count(i => i.Paths.Any(p => _sel.Contains(p)));
@@ -2441,6 +2745,7 @@ public class FarApp
         bool isLicenses  = kind == NavLevelKind.LicensesRoot;
         bool isAgents    = kind == NavLevelKind.AgentsRoot;
         bool isProcesses = kind == NavLevelKind.ProcessesRoot;
+        bool isWeb       = kind == NavLevelKind.WebRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
@@ -2450,6 +2755,8 @@ public class FarApp
             ? $"[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : isProcesses
             ? $"[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [F5] Обновить  [F10] Выход  {ver}"
+            : isWeb
+            ? $"[Enter] Инфо  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
               + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";

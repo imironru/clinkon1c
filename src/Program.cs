@@ -9,6 +9,7 @@ using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
+using Clinkon1C.Modules.Web;
 using Clinkon1C.UI;
 
 namespace Clinkon1C;
@@ -134,7 +135,8 @@ class Program
             var licenses  = new LicensesModule();
             var agents    = new RagentModule();
             var processes = new ProcessesModule();
-            new FarApp(cache, templates, bases, licenses, agents, processes, updateNotice).Run();
+            var web       = new WebModule();
+            new FarApp(cache, templates, bases, licenses, agents, processes, web, updateNotice).Run();
         }
         finally
         {
