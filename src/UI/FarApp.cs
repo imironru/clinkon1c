@@ -1830,26 +1830,121 @@ public class FarApp
     private void DoAgentInfo(string? key)
     {
         if (key == null) return;
-        var e = _agents.Entries.FirstOrDefault(x => x.ServiceKey == key);
-        if (e == null) return;
+
+        AgentEntry? GetE() => _agents.Entries.FirstOrDefault(x => x.ServiceKey == key);
+        if (GetE() == null) return;
+
+        const string keyHint = "[S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  Esc — закрыть";
+
+        ConsoleDialog.ShowTextWithKeys(
+            getInfo: () =>
+            {
+                var e = GetE();
+                return e == null
+                    ? ("Агент", "(не найден)")
+                    : ($"Агент: {e.DisplayName}", BuildAgentInfoText(e));
+            },
+            keyHint: keyHint,
+            onKey: (k, ch) =>
+            {
+                var e = GetE();
+                if (e == null) return false;
+
+                char c = char.ToLower(ch);
+                if (k == ConsoleKey.S || c == 's') { AgentServiceOp(e, "start"); _agents.Refresh(); return true; }
+                if (k == ConsoleKey.T || c == 't') { AgentServiceOp(e, "stop");  _agents.Refresh(); return true; }
+                if (k == ConsoleKey.R || c == 'r') { AgentServiceOp(e, "restart"); _agents.Refresh(); return true; }
+                if (k == ConsoleKey.D || c == 'd') { DoAgentToggleDebugFor(e); _agents.Refresh(); return true; }
+                return true; // прочие клавиши — остаться
+            }
+        );
+
+        R.Invalidate();
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private static string BuildAgentInfoText(AgentEntry e)
+    {
+        int w = Math.Min(Console.WindowWidth - 4, 78) - 4;
+
+        var pairs = new List<(string k, string v)>
+        {
+            ("Служба",    e.ServiceKey),
+            ("Имя",       e.DisplayName),
+            ("Версия 1С", e.Version),
+            ("Порт",      e.Port.ToString()),
+        };
+        if (e.RegPort > 0) pairs.Add(("Порт rmngr", e.RegPort.ToString()));
+        if (!string.IsNullOrEmpty(e.Range))   pairs.Add(("Диапазон", e.Range));
+        if (!string.IsNullOrEmpty(e.DataDir)) pairs.Add(("Каталог",  e.DataDir));
+        pairs.Add(("Отладка", e.DebugEnabled
+            ? $"{e.DebugProtocol.ToUpper()} порт {e.DebugPort}"
+            : "выключена"));
+        pairs.Add(("Статус", StatusDisplay(e.Status)));
+
+        int keyW = pairs.Max(p => p.k.Length);
+        int valW = Math.Max(8, w - keyW - 3);
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Служба:    {e.ServiceKey}");
-        sb.AppendLine($"Имя:       {e.DisplayName}");
-        sb.AppendLine($"Версия 1С: {e.Version}");
-        sb.AppendLine($"Порт:      {e.Port}");
-        if (e.RegPort > 0) sb.AppendLine($"Порт rmngr:{e.RegPort}");
-        if (!string.IsNullOrEmpty(e.Range)) sb.AppendLine($"Диапазон:  {e.Range}");
-        if (!string.IsNullOrEmpty(e.DataDir)) sb.AppendLine($"Каталог:   {e.DataDir}");
-        sb.AppendLine(e.DebugEnabled
-            ? $"Отладка:   {e.DebugProtocol.ToUpper()} порт {e.DebugPort}"
-            : "Отладка:   выключена");
-        sb.AppendLine($"Статус:    {StatusDisplay(e.Status)}");
-        sb.AppendLine();
-        sb.AppendLine("Команда:");
-        sb.AppendLine($"  {e.ImagePath}");
+        foreach (var (k, v) in pairs)
+        {
+            var lines = WordWrapVal(v, valW);
+            for (int i = 0; i < lines.Length; i++)
+                sb.AppendLine(i == 0
+                    ? $"{k.PadRight(keyW)} : {lines[i]}"
+                    : $"{new string(' ', keyW + 3)}{lines[i]}");
+        }
 
-        ConsoleDialog.ShowText($"Агент: {e.DisplayName}", sb.ToString());
+        if (!string.IsNullOrEmpty(e.ImagePath))
+        {
+            sb.AppendLine();
+            sb.AppendLine("Команда:");
+            foreach (var cl in WordWrapVal(e.ImagePath, w - 2))
+                sb.AppendLine("  " + cl);
+        }
+
+        return sb.ToString();
+    }
+
+    private void AgentServiceOp(AgentEntry e, string op)
+    {
+        if (op == "stop" && !e.IsRunning)
+        {
+            ConsoleDialog.ShowText("Стоп", $"Служба уже остановлена:\n{e.DisplayName}");
+            R.Invalidate(); return;
+        }
+        if (op == "start" && e.IsRunning)
+        {
+            ConsoleDialog.ShowText("Запуск", $"Служба уже запущена:\n{e.DisplayName}");
+            R.Invalidate(); return;
+        }
+        if (op is "stop" or "restart")
+        {
+            var q = op == "stop" ? "Остановить" : "Перезапустить";
+            if (!ConsoleDialog.Confirm($"{q} службу", $"{q} агент?\n\n{e.DisplayName}"))
+            { R.Invalidate(); return; }
+        }
+
+        var title = op switch { "start" => "Запуск", "stop" => "Остановка", _ => "Перезапуск" };
+        string? err = null;
+        ConsoleDialog.ShowProgress($"{title}: {e.DisplayName}", _ =>
+        {
+            err = op switch
+            {
+                "start"   => _agents.StartService(e.ServiceKey),
+                "stop"    => _agents.StopService(e.ServiceKey),
+                "restart" => _agents.RestartService(e.ServiceKey),
+                _         => null
+            };
+        });
+        R.Invalidate();
+
+        var doneTitle = op switch { "start" => "Запущено", "stop" => "Остановлено", _ => "Перезапущено" };
+        if (err != null)
+            ConsoleDialog.ShowText($"Ошибка: {title.ToLower()}", err);
+        else
+            ConsoleDialog.ShowText(doneTitle, $"✓ {doneTitle}:\n{e.DisplayName}");
         R.Invalidate();
     }
 
@@ -1857,18 +1952,7 @@ public class FarApp
     {
         var e = AgentUnderCursor();
         if (e == null) return;
-        if (e.IsRunning)
-        {
-            ConsoleDialog.ShowText("Запуск", $"Служба уже запущена:\n{e.DisplayName}");
-            R.Invalidate(); return;
-        }
-
-        string? err = null;
-        ConsoleDialog.ShowProgress($"Запуск: {e.DisplayName}",
-            _ => err = _agents.StartService(e.ServiceKey));
-        R.Invalidate();
-
-        if (err != null) { ConsoleDialog.ShowText("Ошибка запуска", err); R.Invalidate(); }
+        AgentServiceOp(e, "start");
         _agents.Refresh();
         RebuildCurrentLevel();
     }
@@ -1877,21 +1961,7 @@ public class FarApp
     {
         var e = AgentUnderCursor();
         if (e == null) return;
-        if (!e.IsRunning)
-        {
-            ConsoleDialog.ShowText("Стоп", $"Служба уже остановлена:\n{e.DisplayName}");
-            R.Invalidate(); return;
-        }
-
-        if (!ConsoleDialog.Confirm("Остановить службу", $"Остановить агент?\n\n{e.DisplayName}"))
-        { R.Invalidate(); return; }
-
-        string? err = null;
-        ConsoleDialog.ShowProgress($"Остановка: {e.DisplayName}",
-            _ => err = _agents.StopService(e.ServiceKey));
-        R.Invalidate();
-
-        if (err != null) { ConsoleDialog.ShowText("Ошибка остановки", err); R.Invalidate(); }
+        AgentServiceOp(e, "stop");
         _agents.Refresh();
         RebuildCurrentLevel();
     }
@@ -1900,16 +1970,7 @@ public class FarApp
     {
         var e = AgentUnderCursor();
         if (e == null) return;
-
-        if (!ConsoleDialog.Confirm("Перезапуск службы", $"Перезапустить агент?\n\n{e.DisplayName}"))
-        { R.Invalidate(); return; }
-
-        string? err = null;
-        ConsoleDialog.ShowProgress($"Перезапуск: {e.DisplayName}",
-            _ => err = _agents.RestartService(e.ServiceKey));
-        R.Invalidate();
-
-        if (err != null) { ConsoleDialog.ShowText("Ошибка перезапуска", err); R.Invalidate(); }
+        AgentServiceOp(e, "restart");
         _agents.Refresh();
         RebuildCurrentLevel();
     }
@@ -1918,6 +1979,13 @@ public class FarApp
     {
         var e = AgentUnderCursor();
         if (e == null) return;
+        DoAgentToggleDebugFor(e);
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoAgentToggleDebugFor(AgentEntry e)
+    {
 
         string? newProto;
 
@@ -1969,9 +2037,6 @@ public class FarApp
             }
             else R.Invalidate();
         }
-
-        _agents.Refresh();
-        RebuildCurrentLevel();
     }
 
     private void DoAgentNew()

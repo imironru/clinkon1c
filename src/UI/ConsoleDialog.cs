@@ -93,7 +93,8 @@ internal static class ConsoleDialog
         Console.Write(buttons);
     }
 
-    private static void DrawScroll(string title, string[] lines, int scroll, bool hasSave = false)
+    private static void DrawScroll(string title, string[] lines, int scroll,
+        bool hasSave = false, string? overrideHint = null)
     {
         int w      = Math.Min(Console.WindowWidth - 4, 78);
         int innerH = Console.WindowHeight - 6;
@@ -116,10 +117,43 @@ internal static class ConsoleDialog
 
         CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
         Pos(x + 2, y + h - 2);
-        var hint = hasSave
+        var hint = overrideHint ?? (hasSave
             ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
-            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть";
+            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть");
         Console.Write(R.Fit(hint, w - 4));
+    }
+
+    /// <summary>
+    /// Скролл-диалог с интерактивными клавишами. Контент/заголовок перечитываются после каждого
+    /// вызова onKey — позволяет обновить данные (например, после перезапуска службы).
+    /// onKey возвращает true чтобы остаться в диалоге, false — закрыть.
+    /// </summary>
+    public static void ShowTextWithKeys(Func<(string title, string content)> getInfo,
+        string keyHint, Func<ConsoleKey, char, bool>? onKey = null)
+    {
+        int w = Math.Min(Console.WindowWidth - 4, 78);
+        int scroll = 0;
+        string[] all = Array.Empty<string>();
+
+        while (true)
+        {
+            var (title, content) = getInfo();
+            var raw = content.Replace("\r", "").Split('\n');
+            all = WrapLines(raw, w - 4);
+            scroll = Math.Min(scroll, Math.Max(0, all.Length - 1));
+
+            DrawScroll(title, all, scroll, false, keyHint);
+            var k = Console.ReadKey(true);
+
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) break;
+            if (k.Key == ConsoleKey.UpArrow)   { scroll = Math.Max(0, scroll - 1); continue; }
+            if (k.Key == ConsoleKey.DownArrow)  { scroll = Math.Min(all.Length - 1, scroll + 1); continue; }
+            if (k.Key == ConsoleKey.PageUp)     { scroll = Math.Max(0, scroll - 10); continue; }
+            if (k.Key == ConsoleKey.PageDown)   { scroll = Math.Min(all.Length - 1, scroll + 10); continue; }
+            if (k.Key == ConsoleKey.Enter)      break;
+
+            if (onKey != null && !onKey(k.Key, k.KeyChar)) break;
+        }
     }
 
     // ── Мультиселект ────────────────────────────────────────────────────────
