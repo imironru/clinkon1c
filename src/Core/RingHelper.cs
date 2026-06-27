@@ -182,10 +182,13 @@ public static class RingHelper
             if (dashIdx >= 0)
             {
                 version = jarName.Substring(dashIdx + 1);
-                // ring требует минимум X.Y.Z; дополняем .0 если компонент меньше трёх
-                var qualSep  = version.IndexOfAny(new[] { '-', '+' });
-                var numeric  = qualSep < 0 ? version : version.Substring(0, qualSep);
+                // ring принимает только X.Y.Z — стрипим суффиксы вида "-2" или "+2"
+                var qualSep   = version.IndexOfAny(new[] { '-', '+' });
+                var numeric   = qualSep < 0 ? version : version.Substring(0, qualSep);
                 var qualifier = qualSep < 0 ? "" : version.Substring(qualSep);
+                // Чисто числовой суффикс (например -2) ring отвергает — убираем
+                if (System.Text.RegularExpressions.Regex.IsMatch(qualifier, @"^[-+]\d+$"))
+                    qualifier = "";
                 var dots = numeric.Count(c => c == '.');
                 while (dots < 2) { numeric += ".0"; dots++; }
                 version = numeric + qualifier;
