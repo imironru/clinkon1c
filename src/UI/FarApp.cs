@@ -3,6 +3,7 @@ using Clinkon1C.Core;
 using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.Emulators;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
@@ -26,7 +27,8 @@ internal enum NavLevelKind
     LicensesRoot,    // список программных лицензий
     AgentsRoot,      // список служб ragent
     ProcessesRoot,   // список запущенных процессов 1С
-    WebRoot          // список веб-публикаций 1С (Apache)
+    WebRoot,         // список веб-публикаций 1С (Apache)
+    EmulatorsRoot    // аудит эмуляторов HASP
 }
 
 internal class NavItem
@@ -74,6 +76,7 @@ public class FarApp
     private readonly RagentModule    _agents;
     private readonly ProcessesModule _processes;
     private readonly WebModule       _web;
+    private readonly EmulatorModule  _emulators;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -104,7 +107,7 @@ public class FarApp
     // ── Запуск ───────────────────────────────────────────────────────────────
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
                   LicensesModule licenses, RagentModule agents, ProcessesModule processes,
-                  WebModule web, string? updateNotice = null)
+                  WebModule web, EmulatorModule emulators, string? updateNotice = null)
     {
         _cache        = cache;
         _templates    = templates;
@@ -113,6 +116,7 @@ public class FarApp
         _agents       = agents;
         _processes    = processes;
         _web          = web;
+        _emulators    = emulators;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -361,6 +365,15 @@ public class FarApp
                     ModuleId    = "web",
                     Paths       = new List<string>(),
                     Description = "Apache / публикации"
+                },
+                new NavItem
+                {
+                    Name        = "Эмуляторы HASP",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "emulators",
+                    Paths       = new List<string>(),
+                    Description = "аудит лицензий"
                 }
             }
         };
@@ -924,6 +937,44 @@ public class FarApp
         };
     }
 
+    private NavLevel MakeEmulatorsLevel()
+    {
+        var found = _emulators.Found;
+        var items = new List<NavItem> { UpItem() };
+
+        if (found.Count == 0)
+        {
+            items.Add(new NavItem
+            {
+                Name        = "(эмуляторов не обнаружено)",
+                CanEnter    = false,
+                ShowDescCol = false
+            });
+        }
+        else
+        {
+            foreach (var e in found)
+            {
+                items.Add(new NavItem
+                {
+                    Name        = e.Name,
+                    Description = e.Summary(),
+                    ShowDescCol = true,
+                    CanEnter    = true,
+                    BaseName    = e.Name
+                });
+            }
+        }
+
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.EmulatorsRoot,
+            Title = $"Эмуляторы HASP  [{found.Count} найдено из {EmulatorModule.KnownEmulators.Length}]"
+        ,
+            Items = items
+        };
+    }
+
     private static string StatusDisplay(string status) => status switch
     {
         "Running"      => "▶ Работает",
@@ -969,6 +1020,8 @@ public class FarApp
                     EnterProcesses();
                 else if (item.ModuleId == "web")
                     EnterWeb();
+                else if (item.ModuleId == "emulators")
+                    EnterEmulators();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -1036,6 +1089,10 @@ public class FarApp
             case NavLevelKind.WebRoot:
                 if (!item.IsDead) DoWebInfo(item.BaseName);
                 break;
+
+            case NavLevelKind.EmulatorsRoot:
+                DoEmulatorInfo(item.BaseName);
+                break;
         }
     }
 
@@ -1067,6 +1124,7 @@ public class FarApp
             case NavLevelKind.AgentsRoot:    rebuilt = MakeAgentsLevel();    break;
             case NavLevelKind.ProcessesRoot: rebuilt = MakeProcessesLevel(); break;
             case NavLevelKind.WebRoot:       rebuilt = MakeWebLevel();       break;
+            case NavLevelKind.EmulatorsRoot: rebuilt = MakeEmulatorsLevel(); break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -1181,6 +1239,8 @@ public class FarApp
                     DoProcessKill();
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
                     DoWebUnpublish();
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.EmulatorsRoot)
+                    DoEmulatorRemove();
                 else
                     DoDelete();
                 break;
@@ -1206,6 +1266,12 @@ public class FarApp
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
                 {
                     ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
+                    R.Invalidate();
+                    RebuildCurrentLevel();
+                }
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.EmulatorsRoot)
+                {
+                    ConsoleDialog.ShowProgress("Сканирование...", _ => _emulators.Scan());
                     R.Invalidate();
                     RebuildCurrentLevel();
                 }
@@ -1251,9 +1317,15 @@ public class FarApp
                 else if (kind2 == NavLevelKind.WebRoot)
                 {
                     if      (ch == 'p') DoWebPublish();
+                    else if (ch == 'e') DoWebEdit(CurrentItem()?.BaseName);
+                    else if (ch == 'j') DoWebJwt(CurrentItem()?.BaseName);
                     else if (ch == 's') DoWebApacheOp("start");
                     else if (ch == 't') DoWebApacheOp("stop");
                     else if (ch == 'r') DoWebApacheOp("restart");
+                }
+                else if (kind2 == NavLevelKind.EmulatorsRoot)
+                {
+                    if (ch == 'd') DoEmulatorRemove();
                 }
                 else if (ch == 's')
                 {
@@ -1831,6 +1903,13 @@ public class FarApp
         _nav.Push(MakeWebLevel());
     }
 
+    private void EnterEmulators()
+    {
+        ConsoleDialog.ShowProgress("Сканирование эмуляторов HASP...", _ => _emulators.Scan());
+        R.Invalidate();
+        _nav.Push(MakeEmulatorsLevel());
+    }
+
     private void DoWebInfo(string? alias)
     {
         if (string.IsNullOrEmpty(alias)) return;
@@ -1849,6 +1928,9 @@ public class FarApp
                 ("База",          e.DbName),
                 ("Строка подкл.", e.IbString),
                 ("Статус",        e.Enabled ? "Включено" : "Выключено"),
+                ("Анон. вход",    !string.IsNullOrEmpty(e.AnonUser) ? $"да ({e.AnonUser})" : "нет"),
+                ("Отладка",       e.DebugEnabled ? $"да ({e.DebugProtocol})" : "нет"),
+                ("JWT блок",      e.JwtBlockXml != null ? "задан" : "нет"),
                 ("Версия 1С",     e.Version),
                 ("VRD файл",      e.VrdPath),
                 ("Конфиг Apache", e.ConfFile),
@@ -1878,13 +1960,15 @@ public class FarApp
 
         ConsoleDialog.ShowTextWithKeys(
             GetInfo,
-            "[S] Старт  [T] Стоп  [R] Рестарт  Esc — закрыть",
+            "[E] Редактировать  [J] JWT  [S] Старт  [T] Стоп  [R] Рестарт  Esc — закрыть",
             (key, _) =>
             {
                 char ch = char.ToLower((char)key);
-                if      (ch == 's') DoWebApacheOp("start");
-                else if (ch == 't') DoWebApacheOp("stop");
-                else if (ch == 'r') DoWebApacheOp("restart");
+                if (ch == 's') { DoWebApacheOp("start");   return true; }
+                if (ch == 't') { DoWebApacheOp("stop");    return true; }
+                if (ch == 'r') { DoWebApacheOp("restart"); return true; }
+                if (ch == 'e') { DoWebEdit(alias);         return false; }
+                if (ch == 'j') { DoWebJwt(alias);          return false; }
                 return true;
             });
         R.Invalidate();
@@ -2007,6 +2091,178 @@ public class FarApp
 
         if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
             RebuildCurrentLevel();
+    }
+
+    private void DoWebEdit(string? alias)
+    {
+        if (string.IsNullOrEmpty(alias)) return;
+        var e = _web.Entries.FirstOrDefault(x => x.Alias == alias);
+        if (e == null) return;
+
+        var defaults = new Dictionary<string, string>
+        {
+            ["anon"]  = string.IsNullOrEmpty(e.AnonUser) ? "нет" : "да",
+            ["user"]  = e.AnonUser,
+            ["pwd"]   = e.AnonPwd,
+            ["debug"] = e.DebugEnabled ? "да" : "нет",
+            ["proto"] = e.DebugProtocol,
+            ["url"]   = e.DebugUrl,
+        };
+
+        var vals = ConsoleDialog.Form($"Редактирование: {e.Alias}", new (string, string)[]
+        {
+            ("anon",  "Анон. вход (да/нет)"),
+            ("user",  "Пользователь 1С"),
+            ("pwd",   "Пароль"),
+            ("debug", "Отладка (да/нет)"),
+            ("proto", "Протокол (tcp/http)"),
+            ("url",   "URL отладчика"),
+        }, defaults);
+        R.Invalidate();
+        if (vals == null) return;
+
+        bool anonEnabled  = IsYes(vals["anon"]);
+        bool debugEnabled = IsYes(vals["debug"]);
+        string? anonUser  = anonEnabled && !string.IsNullOrEmpty(vals["user"]) ? vals["user"].Trim() : null;
+        string? anonPwd   = anonEnabled && !string.IsNullOrEmpty(vals["pwd"])  ? vals["pwd"].Trim()  : null;
+        string  debugProto = string.IsNullOrWhiteSpace(vals["proto"]) ? "tcp" : vals["proto"].Trim();
+        string  debugUrl   = vals["url"].Trim();
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Сохранение...", _ =>
+            err = _web.UpdateVrd(e, anonUser, anonPwd, debugEnabled, debugProto, debugUrl, e.JwtBlockXml));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); R.Invalidate(); return; }
+
+        bool restart = ConsoleDialog.Confirm("Сохранено",
+            $"{e.Alias} обновлена.\n\nПерезапустить Apache сейчас?");
+        R.Invalidate();
+        if (restart) DoWebApacheOp("restart");
+
+        ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    private void DoWebJwt(string? alias)
+    {
+        if (string.IsNullOrEmpty(alias)) return;
+        var e = _web.Entries.FirstOrDefault(x => x.Alias == alias);
+        if (e == null) return;
+
+        var raw = ConsoleDialog.PasteBlock("JWT — accessTokenAuthentication");
+        R.Invalidate();
+        if (raw == null) return;
+
+        raw = raw.Trim();
+        try
+        {
+            const string ns = "http://v8.1c.ru/8.2/virtual-resource-system";
+            var tempDoc = new System.Xml.XmlDocument();
+            tempDoc.LoadXml($"<root xmlns=\"{ns}\">{raw}</root>");
+            var first = tempDoc.DocumentElement?.FirstChild as System.Xml.XmlElement;
+            if (first?.LocalName != "accessTokenAuthentication")
+            {
+                ConsoleDialog.ShowText("Ошибка XML",
+                    $"Ожидается <accessTokenAuthentication>.\nПолучен: <{first?.LocalName ?? "?"}>");
+                R.Invalidate();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            ConsoleDialog.ShowText("Ошибка XML", ex.Message);
+            R.Invalidate();
+            return;
+        }
+
+        string? anonUser = string.IsNullOrEmpty(e.AnonUser) ? null : e.AnonUser;
+        string? anonPwd  = string.IsNullOrEmpty(e.AnonPwd)  ? null : e.AnonPwd;
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Сохранение JWT...", _ =>
+            err = _web.UpdateVrd(e, anonUser, anonPwd, e.DebugEnabled, e.DebugProtocol, e.DebugUrl, raw));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); R.Invalidate(); return; }
+
+        bool restart = ConsoleDialog.Confirm("JWT сохранён",
+            $"{e.Alias} обновлена.\n\nПерезапустить Apache сейчас?");
+        R.Invalidate();
+        if (restart) DoWebApacheOp("restart");
+
+        ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    // ── Эмуляторы HASP ───────────────────────────────────────────────────────
+
+    private void DoEmulatorInfo(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+        var e = _emulators.Found.FirstOrDefault(x => x.Name == name);
+        if (e == null) return;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Эмулятор: {e.Name}");
+        sb.AppendLine();
+        sb.AppendLine($"Сервис:   {(e.SvcFound ? (e.SvcRunning ? "запущен" : "остановлен") : "не найден")}");
+        if (e.SysPaths.Length > 0)
+        {
+            sb.AppendLine($".sys файлы ({e.SysPaths.Length}):");
+            foreach (var p in e.SysPaths) sb.AppendLine($"  {p}");
+        }
+        else
+        {
+            sb.AppendLine(".sys файлы: не найдены");
+        }
+        sb.AppendLine($"Дамп реестра: {(e.DumpFound ? "найден" : "нет")}");
+        if (e.DumpFound)
+            sb.AppendLine($"  HKLM\\SYSTEM\\CurrentControlSet\\{e.Name}");
+
+        ConsoleDialog.ShowText($"Эмулятор — {e.Name}", sb.ToString().TrimEnd());
+        R.Invalidate();
+    }
+
+    private void DoEmulatorRemove()
+    {
+        var lvl = _nav.Peek();
+        if (lvl.Kind != NavLevelKind.EmulatorsRoot) return;
+        var item = lvl.Items[lvl.Cursor];
+        if (item.IsUp || string.IsNullOrEmpty(item.BaseName)) return;
+
+        var e = _emulators.Found.FirstOrDefault(x => x.Name == item.BaseName);
+        if (e == null) return;
+
+        bool ok = ConsoleDialog.Confirm("Удаление эмулятора",
+            $"Удалить эмулятор {e.Name}?\n\n{e.Summary()}\n\nПосле удаления потребуется перезагрузка ПК.");
+        R.Invalidate();
+        if (!ok) return;
+
+        bool done = false;
+        string msg = "";
+        ConsoleDialog.ShowProgress($"Удаление {e.Name}...", _ =>
+        {
+            var (res, text) = _emulators.Remove(e);
+            done = res;
+            msg  = text;
+        });
+        R.Invalidate();
+
+        ConsoleDialog.ShowText(done ? "Готово" : "Ошибка", msg);
+        R.Invalidate();
+
+        ConsoleDialog.ShowProgress("Повторное сканирование...", _ => _emulators.Scan());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    private static bool IsYes(string s)
+    {
+        s = s.Trim().ToLowerInvariant();
+        return s is "да" or "yes" or "y" or "1" or "true";
     }
 
     private void DoProcessInfo(string? pidStr)
@@ -2580,6 +2836,19 @@ public class FarApp
             return;
         }
 
+        // Эмуляторы HASP — двухколоночная раскладка с красной подсветкой
+        if (kind == NavLevelKind.EmulatorsRoot && !item.IsUp && item.BaseName != null)
+        {
+            var efg = isCursor ? R.CurFg : ConsoleColor.Red;
+            var ebg = isCursor ? R.CurBg : R.PanelBg;
+            const int nameW = 20;
+            R.BoxRow(row,
+                R.Fit($" ⚠ {item.Name}", nameW)
+                + R.Fit(item.Description ?? "", InnerW - nameW),
+                efg, ebg);
+            return;
+        }
+
         // Агенты — специальная трёхколоночная раскладка
         if (kind == NavLevelKind.AgentsRoot && !item.IsUp)
         {
@@ -2696,8 +2965,18 @@ public class FarApp
         {
             var apacheSt = !_web.ApacheFound ? "не найден"
                 : (_web.ApacheRunning ? "▶ Работает" : "■ Остановлен");
-            var webInfo  = $"  {_web.Entries.Count} публик.  │  Apache: {apacheSt}  │  [Enter] Инфо  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить";
+            var webInfo  = $"  {_web.Entries.Count} публик.  │  Apache: {apacheSt}  │  [Enter] Инфо  [E] Редакт.  [J] JWT  [P] Публик.  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить";
             R.BoxRow(InfoRow, webInfo, R.HdrFg, R.HdrBg);
+            return;
+        }
+
+        if (lvl.Kind == NavLevelKind.EmulatorsRoot)
+        {
+            int found = _emulators.Found.Count;
+            var emulInfo = found == 0
+                ? $"  Проверено {EmulatorModule.KnownEmulators.Length} эмуляторов  │  Система чиста  │  [F5] Повторить скан"
+                : $"  Найдено: {found} из {EmulatorModule.KnownEmulators.Length}  │  [Enter] Детали  [D]/[F8] Удалить  [F5] Повторить скан";
+            R.BoxRow(InfoRow, emulInfo, found > 0 ? ConsoleColor.Red : ConsoleColor.Green, R.HdrBg);
             return;
         }
 
@@ -2746,6 +3025,7 @@ public class FarApp
         bool isAgents    = kind == NavLevelKind.AgentsRoot;
         bool isProcesses = kind == NavLevelKind.ProcessesRoot;
         bool isWeb       = kind == NavLevelKind.WebRoot;
+        bool isEmulators = kind == NavLevelKind.EmulatorsRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
@@ -2756,7 +3036,9 @@ public class FarApp
             : isProcesses
             ? $"[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [F5] Обновить  [F10] Выход  {ver}"
             : isWeb
-            ? $"[Enter] Инфо  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Enter] Инфо  [E] Редактировать  [J] JWT  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить  [F10] Выход  {ver}"
+            : isEmulators
+            ? $"[Enter] Детали  [D]/[F8] Удалить  [F5] Повторить скан  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showTab ? $"  [Tab] {view}" : "")
               + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";

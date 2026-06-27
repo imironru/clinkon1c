@@ -6,15 +6,22 @@ namespace Clinkon1C.Modules.Web;
 
 public class WebEntry
 {
-    public string Alias    { get; set; } = "";  // /pubname
-    public string DllPath  { get; set; } = "";  // C:\...\wsap24.dll
-    public string VrdPath  { get; set; } = "";  // C:\Apache24\conf\1cws\pubname.vrd
-    public string ConfFile { get; set; } = "";  // Apache conf-файл с Alias
-    public string IbString { get; set; } = "";  // File="..." / Srvr="...";Ref="..."
-    public string DbType   { get; set; } = "";  // "Файл" / "Сервер"
-    public string DbName   { get; set; } = "";  // краткое имя/путь базы
-    public string Version  { get; set; } = "";  // 8.3.27.1989
-    public bool   Enabled  { get; set; } = true;
+    public string  Alias        { get; set; } = "";  // /pubname
+    public string  DllPath      { get; set; } = "";  // C:\...\wsap24.dll
+    public string  VrdPath      { get; set; } = "";  // C:\Apache24\conf\1cws\pubname.vrd
+    public string  ConfFile     { get; set; } = "";  // Apache conf-файл с Alias
+    public string  IbString     { get; set; } = "";  // File="..." / Srvr="...";Ref="..."
+    public string  DbType       { get; set; } = "";  // "Файл" / "Сервер"
+    public string  DbName       { get; set; } = "";  // краткое имя/путь базы
+    public string  Version      { get; set; } = "";  // 8.3.27.1989
+    public bool    Enabled      { get; set; } = true;
+    // Расширенные поля (из VRD)
+    public string  AnonUser     { get; set; } = "";
+    public string  AnonPwd      { get; set; } = "";
+    public bool    DebugEnabled  { get; set; }
+    public string  DebugProtocol { get; set; } = "tcp";
+    public string  DebugUrl      { get; set; } = "";
+    public string? JwtBlockXml   { get; set; }
 }
 
 public class WebModule
@@ -195,10 +202,105 @@ public class WebModule
             entry.Enabled  = !string.Equals(root.GetAttribute("enable"), "false",
                 StringComparison.OrdinalIgnoreCase);
             ParseIb(entry);
+
+            // Анонимный вход: Usr=/Pwd= в строке ib (XmlDocument уже раскодировал &quot;)
+            var usrM = Regex.Match(entry.IbString, @"Usr\s*=\s*""?([^"";]+)", RegexOptions.IgnoreCase);
+            var pwdM = Regex.Match(entry.IbString, @"Pwd\s*=\s*""?([^"";]+)", RegexOptions.IgnoreCase);
+            entry.AnonUser = usrM.Success ? usrM.Groups[1].Value.Trim() : "";
+            entry.AnonPwd  = pwdM.Success ? pwdM.Groups[1].Value.Trim() : "";
+
+            // Отладка
+            var debugEl = FindChildElement(root, "debug");
+            if (debugEl != null)
+            {
+                entry.DebugEnabled = string.Equals(debugEl.GetAttribute("enable"), "true",
+                    StringComparison.OrdinalIgnoreCase);
+                var proto = debugEl.GetAttribute("protocol");
+                entry.DebugProtocol = string.IsNullOrEmpty(proto) ? "tcp" : proto;
+                entry.DebugUrl      = debugEl.GetAttribute("url");
+            }
+
+            // JWT блок
+            var jwtEl = FindChildElement(root, "accessTokenAuthentication");
+            if (jwtEl != null)
+                entry.JwtBlockXml = jwtEl.OuterXml;
         }
         catch (Exception ex)
         {
             Logger.Warn($"WebModule.ParseVrd [{path}]: {ex.Message}");
+        }
+    }
+
+    private static XmlElement? FindChildElement(XmlNode parent, string localName)
+    {
+        foreach (XmlNode n in parent.ChildNodes)
+            if (n.NodeType == XmlNodeType.Element && n.LocalName == localName)
+                return (XmlElement)n;
+        return null;
+    }
+
+    private static string SetIbCredentials(string ib, string? user, string? pwd)
+    {
+        ib = Regex.Replace(ib, @"Usr\s*=\s*(?:""[^""]*""|[^;]*);?", "", RegexOptions.IgnoreCase);
+        ib = Regex.Replace(ib, @"Pwd\s*=\s*(?:""[^""]*""|[^;]*);?", "", RegexOptions.IgnoreCase);
+        ib = ib.TrimEnd(';').TrimEnd() + ";";
+        if (!string.IsNullOrEmpty(user)) ib += $"Usr={user};";
+        if (!string.IsNullOrEmpty(pwd))  ib += $"Pwd={pwd};";
+        return ib;
+    }
+
+    /// <summary>Обновляет существующий VRD: анонимный доступ, отладка, JWT блок.</summary>
+    public string? UpdateVrd(WebEntry entry, string? anonUser, string? anonPwd,
+        bool debugEnabled, string debugProtocol, string debugUrl, string? jwtXml)
+    {
+        try
+        {
+            var doc  = new XmlDocument();
+            doc.Load(entry.VrdPath);
+            var root = doc.DocumentElement!;
+            var ns   = root.NamespaceURI;
+
+            // Строка подключения
+            root.SetAttribute("ib", SetIbCredentials(entry.IbString, anonUser, anonPwd));
+
+            // Отладка
+            var debugEl = FindChildElement(root, "debug");
+            if (!debugEnabled)
+            {
+                if (debugEl != null) root.RemoveChild(debugEl);
+            }
+            else
+            {
+                if (debugEl == null)
+                {
+                    debugEl = doc.CreateElement("debug", ns);
+                    root.AppendChild(debugEl);
+                }
+                debugEl.SetAttribute("enable", "true");
+                if (!string.IsNullOrEmpty(debugProtocol)) debugEl.SetAttribute("protocol", debugProtocol);
+                if (!string.IsNullOrEmpty(debugUrl))      debugEl.SetAttribute("url", debugUrl);
+                else                                       debugEl.RemoveAttribute("url");
+            }
+
+            // JWT блок
+            var jwtEl = FindChildElement(root, "accessTokenAuthentication");
+            if (jwtEl != null) root.RemoveChild(jwtEl);
+            if (!string.IsNullOrEmpty(jwtXml))
+            {
+                var tempDoc = new XmlDocument();
+                tempDoc.LoadXml($"<root xmlns=\"{ns}\">{jwtXml.Trim()}</root>");
+                if (tempDoc.DocumentElement?.FirstChild != null)
+                    root.AppendChild(doc.ImportNode(tempDoc.DocumentElement.FirstChild, true));
+            }
+
+            doc.Save(entry.VrdPath);
+            Logger.Info($"WebModule: обновлён VRD {entry.VrdPath}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"WebModule.UpdateVrd: {ex.Message}");
+            return ex.Message;
         }
     }
 

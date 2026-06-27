@@ -380,6 +380,62 @@ internal static class ConsoleDialog
         }
     }
 
+    // ── Вставка многострочного блока (JWT/XML) ───────────────────────────────
+    /// <summary>Диалог сбора многострочного XML из буфера обмена. null = отмена.</summary>
+    public static string? PasteBlock(string title)
+    {
+        var sb = new System.Text.StringBuilder();
+        int w  = Math.Min(Console.WindowWidth - 4, 72);
+        int h  = 9;
+        int x  = (Console.WindowWidth  - w) / 2;
+        int y  = Math.Max(0, (Console.WindowHeight - h) / 2);
+
+        while (true)
+        {
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, title);
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            Pos(x + 2, y + 2);
+            Console.Write(R.Fit("Вставьте XML-блок (Ctrl+V), дождитесь окончания,", w - 4));
+            Pos(x + 2, y + 3);
+            Console.Write(R.Fit("затем нажмите F5 для подтверждения.", w - 4));
+
+            var text  = sb.ToString().Replace("\r", "");
+            int lines = text.Length > 0 ? text.Split('\n').Length : 0;
+
+            Pos(x + 2, y + 5);
+            CC(lines > 0 ? ConsoleColor.Green : ConsoleColor.DarkGray, ConsoleColor.DarkBlue);
+            Console.Write(R.Fit(
+                lines > 0 ? $"Получено: {lines} строк / {sb.Length} симв." : "(пусто)",
+                w - 4));
+
+            Pos(x + 2, y + 6);
+            CC(ConsoleColor.Cyan, ConsoleColor.DarkBlue);
+            if (lines > 0)
+            {
+                var first = text.Split('\n')[0].Trim();
+                if (first.Length > w - 6) first = first.Substring(0, w - 7) + "…";
+                Console.Write(R.Fit("  " + first, w - 4));
+            }
+            else
+                Console.Write(new string(' ', w - 4));
+
+            CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + h - 2);
+            Console.Write(R.Fit("[F5] Подтвердить   [Del] Очистить   [Esc] Отмена", w - 4));
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Escape)                     return null;
+            if (k.Key == ConsoleKey.F5)                         return sb.Length > 0 ? sb.ToString() : null;
+            if (k.Key == ConsoleKey.Delete)                     { sb.Clear(); continue; }
+            if (k.Key == ConsoleKey.Enter)                      { sb.Append('\n'); continue; }
+            if (k.Key == ConsoleKey.Backspace && sb.Length > 0) { sb.Remove(sb.Length - 1, 1); continue; }
+            if (!char.IsControl(k.KeyChar))                     sb.Append(k.KeyChar);
+        }
+    }
+
     // ── Перенос длинных строк ────────────────────────────────────────────────
     private static string[] WrapLines(string[] lines, int maxWidth)
     {
