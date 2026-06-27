@@ -120,6 +120,7 @@ class Program
         catch { /* сетевые ошибки не останавливают запуск */ }
 
         // Запуск приложения
+        Console.Title = $"Clinkon1C v{VERSION}";
         Logger.Info($"Clinkon1C v{VERSION} ({FullVersion}) запуск TUI");
         try
         {

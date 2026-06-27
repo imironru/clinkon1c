@@ -71,20 +71,24 @@ public class LicensesModule
             string name;
             string fileName = "";
 
-            // Формат ring: "Лицензия: NAME (имя файла: "FILE.lic")"
-            // [^(]+ — жадный, но не захватывает '(' чтобы имя не слилось с блоком filename
-            var m = Regex.Match(t,
-                @"(?:Лицензия|License)\s*:\s*([^(]+?)(?:\s*\((?:имя файла|file name)\s*:\s*[""']?([^""')]+)[""']?\))?$",
+            // Ищем блок (имя файла: "FILE.lic") в любом месте строки
+            var fm = Regex.Match(t,
+                @"\((?:имя файла|file name)\s*:\s*[""']?([^""')]+)[""']?\)",
                 RegexOptions.IgnoreCase);
-            if (m.Success)
+            if (fm.Success)
             {
-                name = m.Groups[1].Value.Trim();
-                fileName = m.Groups[2].Value.Trim();
+                fileName = fm.Groups[1].Value.Trim();
+                // Имя — всё до блока с файлом
+                name = t.Substring(0, fm.Index).Trim();
             }
             else
             {
                 name = t;
             }
+
+            // Убираем возможный префикс "Лицензия: " или "License: "
+            var lp = Regex.Match(name, @"^(?:Лицензия|License)\s*:\s*", RegexOptions.IgnoreCase);
+            if (lp.Success) name = name.Substring(lp.Length).Trim();
 
             if (string.IsNullOrEmpty(name)) continue;
 
