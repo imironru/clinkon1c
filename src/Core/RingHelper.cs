@@ -199,11 +199,30 @@ public static class RingHelper
             $"  arch: x86_64\n" +
             $"  file: \"{mainJar}\"\n";
 
+        Logger.Info($"RingHelper: ring-commands.cfg version={version}");
+
         // 1. Наш RingDir — для E1C_RING_COMMANDS override
         var ourCfg = Path.Combine(RingDir, "ring-commands.cfg");
         File.WriteAllText(ourCfg, content, Encoding.UTF8);
 
-        // 2. Стандартный путь 1C — %ProgramData%\1C\1CE\ring-commands.cfg
+        // 2. Директория самого ring.cmd (системный 1С хранит там свой ring-commands.cfg с 0.15)
+        //    Перезаписываем нормализованной версией — ring читает именно оттуда
+        try
+        {
+            var ringCmd = FindRingCmd();
+            if (ringCmd != null)
+            {
+                var ringCmdDir = Path.GetDirectoryName(ringCmd);
+                if (ringCmdDir != null)
+                    File.WriteAllText(Path.Combine(ringCmdDir, "ring-commands.cfg"), content, Encoding.UTF8);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"RingHelper: не удалось записать ring-commands.cfg в каталог ring: {ex.Message}");
+        }
+
+        // 3. Стандартный путь 1C — %ProgramData%\1C\1CE\ring-commands.cfg
         try
         {
             var oneCPath = Path.Combine(
