@@ -3087,14 +3087,14 @@ public class FarApp
         if (kind == NavLevelKind.ConfigsRoot && !item.IsUp)
         {
             var cfgFg = isCursor ? R.CurFg
-                : (!item.Found ? ConsoleColor.DarkGray
+                : (item.IsDead ? ConsoleColor.DarkGray
                 : item.CanEnter ? ConsoleColor.Cyan
                 : ConsoleColor.DarkCyan);
             var cfgBg = isCursor ? R.CurBg : R.PanelBg;
             const int nameW = 22;
             var pathStr = item.Description ?? "";
             // для найденных — сокращаем путь
-            if (item.Found && pathStr.Length > InnerW - nameW - 1)
+            if (!item.IsDead && pathStr.Length > InnerW - nameW - 1)
                 pathStr = "…" + pathStr.Substring(pathStr.Length - (InnerW - nameW - 2));
             R.BoxRow(row,
                 R.Fit($" {(item.CanEnter ? "►" : " ")} {item.Name}", nameW)
@@ -3249,9 +3249,9 @@ public class FarApp
 
         if (lvl.Kind == NavLevelKind.ConfigsRoot)
         {
-            int found = _configs.Files.Count(f => f.Found);
-            int total = _configs.Files.Count;
-            var cfgInfo = $"  {found} из {total} файлов найдено  │  [Enter] Редактировать  │  [F5] Обновить";
+            int found      = _configs.Files.Count(f => f.Found);
+            int totalFiles = _configs.Files.Count;
+            var cfgInfo = $"  {found} из {totalFiles} файлов найдено  │  [Enter] Редактировать  │  [F5] Обновить";
             R.BoxRow(InfoRow, cfgInfo, R.HdrFg, R.HdrBg);
             return;
         }

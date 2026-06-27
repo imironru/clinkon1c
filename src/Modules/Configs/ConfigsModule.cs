@@ -272,7 +272,8 @@ public class ConfigsModule
             if (dumpEl != null)
             {
                 s.DumpPath = dumpEl.GetAttribute("location");
-                s.DumpType = dumpEl.GetAttribute("type").Let(v => string.IsNullOrEmpty(v) ? "3" : v);
+                var dt = dumpEl.GetAttribute("type");
+                s.DumpType = string.IsNullOrEmpty(dt) ? "3" : dt;
             }
 
             // <system>
