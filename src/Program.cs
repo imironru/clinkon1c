@@ -88,8 +88,10 @@ class Program
         }
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        // Регистрируем CP1251 и другие Windows-кодировки (нужно для .NET 8+)
+#if !NETFRAMEWORK
+        // В .NET 8+ CP1251 недоступен без явной регистрации; в net48 встроен
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+#endif
         Logger.Init();
         Logger.Info($"Clinkon1C v{VERSION} запущен пользователем {Environment.UserName}");
 
