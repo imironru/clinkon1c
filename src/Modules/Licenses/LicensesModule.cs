@@ -218,8 +218,11 @@ public class LicensesModule
                 if (sep <= 0) continue;
                 var key = line.Substring(0, sep).Trim();
                 var val = line.Substring(sep + 1).Trim();
-                if (!string.IsNullOrEmpty(key))
-                    result[key] = val;
+                if (string.IsNullOrEmpty(key)) continue;
+                // Пропускаем строки цифровой подписи: Base64-хэш с пустым значением
+                if (string.IsNullOrEmpty(val) && Regex.IsMatch(key, @"^[A-Za-z0-9+/]+=*$"))
+                    continue;
+                result[key] = val;
             }
         }
         catch (Exception ex)
