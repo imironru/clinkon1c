@@ -1831,7 +1831,7 @@ public class FarApp
     {
         if (key == null) return;
 
-        AgentEntry? GetE() => _agents.Entries.FirstOrDefault(x => x.ServiceKey == key);
+        RagentEntry? GetE() => _agents.Entries.FirstOrDefault(x => x.ServiceKey == key);
         if (GetE() == null) return;
 
         const string keyHint = "[S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  Esc — закрыть";
@@ -1864,7 +1864,7 @@ public class FarApp
         RebuildCurrentLevel();
     }
 
-    private static string BuildAgentInfoText(AgentEntry e)
+    private static string BuildAgentInfoText(RagentEntry e)
     {
         int w = Math.Min(Console.WindowWidth - 4, 78) - 4;
 
@@ -1907,7 +1907,7 @@ public class FarApp
         return sb.ToString();
     }
 
-    private void AgentServiceOp(AgentEntry e, string op)
+    private void AgentServiceOp(RagentEntry e, string op)
     {
         if (op == "stop" && !e.IsRunning)
         {
@@ -1984,7 +1984,7 @@ public class FarApp
         RebuildCurrentLevel();
     }
 
-    private void DoAgentToggleDebugFor(AgentEntry e)
+    private void DoAgentToggleDebugFor(RagentEntry e)
     {
 
         string? newProto;
