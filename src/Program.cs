@@ -88,6 +88,8 @@ class Program
         }
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
+        // Регистрируем CP1251 и другие Windows-кодировки (нужно для .NET 8+)
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         Logger.Init();
         Logger.Info($"Clinkon1C v{VERSION} запущен пользователем {Environment.UserName}");
 

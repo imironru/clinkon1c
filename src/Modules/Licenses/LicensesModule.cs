@@ -201,8 +201,18 @@ public class LicensesModule
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            var enc = Encoding.GetEncoding(1251);
-            foreach (var line in File.ReadAllLines(path, enc))
+            // Пробуем UTF-8 (современные .lic); если первая строка не читается — CP1251
+            string[] lines;
+            try
+            {
+                lines = File.ReadAllLines(path, new UTF8Encoding(false, true)); // throwOnInvalid=true
+            }
+            catch (DecoderFallbackException)
+            {
+                lines = File.ReadAllLines(path, Encoding.GetEncoding(1251));
+            }
+
+            foreach (var line in lines)
             {
                 var sep = line.IndexOf(':');
                 if (sep <= 0) continue;
