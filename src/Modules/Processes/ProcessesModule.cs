@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Management;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text.RegularExpressions;
 using Clinkon1C.Core;
 
@@ -70,44 +72,56 @@ public class ProcessesModule
         }
     }
 
+    // ── P/Invoke для получения владельца процесса ────────────────────────────
+
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const uint TOKEN_QUERY = 0x0008;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    private static string GetProcessOwner(int pid)
+    {
+        var hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (hProcess == IntPtr.Zero) return "";
+        try
+        {
+            if (!OpenProcessToken(hProcess, TOKEN_QUERY, out var hToken)) return "";
+            try
+            {
+                using var identity = new WindowsIdentity(hToken);
+                return identity.Name; // "DOMAIN\User" или "MACHINE\User"
+            }
+            catch { return ""; }
+            finally { CloseHandle(hToken); }
+        }
+        finally { CloseHandle(hProcess); }
+    }
+
     private static void GetWmiInfo(int pid, OneCProcessEntry entry)
     {
+        // CommandLine через WMI (SELECT достаточен, InvokeMethod не нужен)
         try
         {
             using var searcher = new ManagementObjectSearcher(
                 $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}");
             using var col = searcher.Get();
-            foreach (ManagementBaseObject baseObj in col)
+            foreach (ManagementBaseObject obj in col)
             {
-                if (baseObj is not ManagementObject obj) continue;
                 using (obj)
-                {
                     entry.CmdLine = obj["CommandLine"] as string ?? "";
-
-                    // GetOwner — OUT-параметры возвращаются как ManagementBaseObject
-                    // Третий аргумент явно typed чтобы выбрать нужную перегрузку
-                    ManagementBaseObject? ownerResult = null;
-                    try
-                    {
-                        ownerResult = obj.InvokeMethod(
-                            "GetOwner",
-                            (ManagementBaseObject?)null,
-                            (InvokeMethodOptions?)null);
-                        if (ownerResult != null)
-                        {
-                            var user   = ownerResult["User"]   as string ?? "";
-                            var domain = ownerResult["Domain"] as string ?? "";
-                            if (!string.IsNullOrEmpty(user))
-                                entry.WinUser = string.IsNullOrEmpty(domain)
-                                    ? user
-                                    : $"{domain}\\{user}";
-                        }
-                    }
-                    finally { ownerResult?.Dispose(); }
-                }
             }
         }
         catch { }
+
+        // Владелец через P/Invoke + WindowsIdentity (надёжнее WMI GetOwner)
+        entry.WinUser = GetProcessOwner(pid);
     }
 
     private static void ParseCmdLine(OneCProcessEntry entry)
