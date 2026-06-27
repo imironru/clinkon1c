@@ -45,7 +45,9 @@ internal static class ConsoleDialog
     // ── Текст со скроллом (Dry Run, Help) ────────────────────────────────────
     public static void ShowText(string title, string text)
     {
-        var all = text.Replace("\r", "").Split('\n');
+        int w   = Math.Min(Console.WindowWidth - 4, 78);
+        var raw = text.Replace("\r", "").Split('\n');
+        var all = WrapLines(raw, w - 4);
         int scroll = 0;
         while (true)
         {
@@ -326,6 +328,28 @@ internal static class ConsoleDialog
             else if (!char.IsControl(k.KeyChar))
                 values[cursor] += k.KeyChar;
         }
+    }
+
+    // ── Перенос длинных строк ────────────────────────────────────────────────
+    private static string[] WrapLines(string[] lines, int maxWidth)
+    {
+        if (maxWidth <= 4) return lines;
+        var result = new List<string>();
+        foreach (var line in lines)
+        {
+            if (line.Length <= maxWidth) { result.Add(line); continue; }
+            var s     = line;
+            bool first = true;
+            while (s.Length > 0)
+            {
+                int indent = first ? 0 : 2;
+                int take   = Math.Min(maxWidth - indent, s.Length);
+                result.Add(new string(' ', indent) + s.Substring(0, take));
+                s     = s.Substring(take);
+                first = false;
+            }
+        }
+        return result.ToArray();
     }
 
     // ── Примитивы (прямой вывод в Console) ───────────────────────────────────
