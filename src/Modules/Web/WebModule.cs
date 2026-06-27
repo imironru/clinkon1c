@@ -112,28 +112,28 @@ public class WebModule
 
         // Ищем ManagedApplicationDescriptor → VRD путь
         var vrdRefs = new List<(string VrdPath, string ConfFile)>();
-        foreach (var (file, content) in allConf)
+        foreach (var kvp in allConf)
         {
-            foreach (Match m in Regex.Matches(content,
+            foreach (Match m in Regex.Matches(kvp.Value,
                 @"ManagedApplicationDescriptor\s+""?([^""\r\n]+\.vrd)""?",
                 RegexOptions.IgnoreCase | RegexOptions.Multiline))
             {
-                vrdRefs.Add((m.Groups[1].Value.Trim(), file));
+                vrdRefs.Add((m.Groups[1].Value.Trim(), kvp.Key));
             }
         }
 
         var result = new List<WebEntry>();
-        foreach (var (vrdPath, confFile) in vrdRefs)
+        foreach (var vrdRef in vrdRefs)
         {
-            if (!File.Exists(vrdPath)) continue;
-            var entry = new WebEntry { VrdPath = vrdPath, ConfFile = confFile };
-            ParseVrd(vrdPath, entry);
+            if (!File.Exists(vrdRef.VrdPath)) continue;
+            var entry = new WebEntry { VrdPath = vrdRef.VrdPath, ConfFile = vrdRef.ConfFile };
+            ParseVrd(vrdRef.VrdPath, entry);
 
             if (!string.IsNullOrEmpty(entry.Alias))
             {
-                foreach (var (_, cnt) in allConf)
+                foreach (var kvp2 in allConf)
                 {
-                    var am = Regex.Match(cnt,
+                    var am = Regex.Match(kvp2.Value,
                         $@"^Alias\s+{Regex.Escape(entry.Alias)}\s+""?([^""\r\n]+)""?",
                         RegexOptions.IgnoreCase | RegexOptions.Multiline);
                     if (!am.Success) continue;
