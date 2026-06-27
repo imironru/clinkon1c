@@ -840,8 +840,14 @@ public class FarApp
             var dbDisplay = string.IsNullOrEmpty(e.DbName)
                 ? (string.IsNullOrEmpty(e.DbPath) ? e.ExeName : e.DbPath)
                 : e.DbName;
-            if (!string.IsNullOrEmpty(e.DbType))
-                dbDisplay = $"[{e.DbType[0]}] {dbDisplay}";
+            var typePrefix = e.DbType switch
+            {
+                "Файл"  => "[Ф] ",
+                "Сервер"=> "[С] ",
+                "Веб"   => "[В] ",
+                _       => ""
+            };
+            dbDisplay = typePrefix + dbDisplay;
 
             items.Add(new NavItem
             {

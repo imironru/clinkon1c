@@ -84,15 +84,26 @@ public class ProcessesModule
                 {
                     entry.CmdLine = obj["CommandLine"] as string ?? "";
 
-                    // GetOwner(out string User, out string Domain) через WMI
-                    var ownerArgs = new string[] { "", "" };
-                    obj.InvokeMethod("GetOwner", ownerArgs);
-                    var user   = ownerArgs[0] ?? "";
-                    var domain = ownerArgs[1] ?? "";
-                    if (!string.IsNullOrEmpty(user))
-                        entry.WinUser = string.IsNullOrEmpty(domain)
-                            ? user
-                            : $"{domain}\\{user}";
+                    // GetOwner — OUT-параметры возвращаются как ManagementBaseObject
+                    // Третий аргумент явно typed чтобы выбрать нужную перегрузку
+                    ManagementBaseObject? ownerResult = null;
+                    try
+                    {
+                        ownerResult = obj.InvokeMethod(
+                            "GetOwner",
+                            (ManagementBaseObject?)null,
+                            (InvokeMethodOptions?)null);
+                        if (ownerResult != null)
+                        {
+                            var user   = ownerResult["User"]   as string ?? "";
+                            var domain = ownerResult["Domain"] as string ?? "";
+                            if (!string.IsNullOrEmpty(user))
+                                entry.WinUser = string.IsNullOrEmpty(domain)
+                                    ? user
+                                    : $"{domain}\\{user}";
+                        }
+                    }
+                    finally { ownerResult?.Dispose(); }
                 }
             }
         }
@@ -112,8 +123,8 @@ public class ProcessesModule
         else
             entry.Mode = "1С";
 
-        // Файловая база /F
-        var fm = Regex.Match(cmd, @"[/-]F\s+""([^""]+)""", RegexOptions.IgnoreCase);
+        // Файловая база /F или /F"path" (пробел между ключом и значением необязателен)
+        var fm = Regex.Match(cmd, @"[/-]F\s*""([^""]+)""", RegexOptions.IgnoreCase);
         if (!fm.Success)
             fm = Regex.Match(cmd, @"[/-]F\s+(\S+)", RegexOptions.IgnoreCase);
         if (fm.Success)
@@ -125,7 +136,7 @@ public class ProcessesModule
         }
 
         // Серверная база /S
-        var sm = Regex.Match(cmd, @"[/-]S\s+""([^""]+)""", RegexOptions.IgnoreCase);
+        var sm = Regex.Match(cmd, @"[/-]S\s*""([^""]+)""", RegexOptions.IgnoreCase);
         if (!sm.Success)
             sm = Regex.Match(cmd, @"[/-]S\s+(\S+)", RegexOptions.IgnoreCase);
         if (sm.Success)
@@ -138,8 +149,37 @@ public class ProcessesModule
                 : entry.DbPath;
         }
 
+        // Именованная база /IBName (тонкий клиент / веб-клиент, пробел необязателен)
+        // Пример: /IBName"КА2 Спецкомплект ИС" или /IBName "trade"
+        if (string.IsNullOrEmpty(entry.DbName))
+        {
+            var ibm = Regex.Match(cmd, @"[/-]IBName\s*""([^""]+)""", RegexOptions.IgnoreCase);
+            if (!ibm.Success)
+                ibm = Regex.Match(cmd, @"[/-]IBName\s+(\S+)", RegexOptions.IgnoreCase);
+            if (ibm.Success)
+            {
+                entry.DbType = "";
+                entry.DbPath = ibm.Groups[1].Value;
+                entry.DbName = ibm.Groups[1].Value;
+            }
+        }
+
+        // Веб-база /WS
+        if (string.IsNullOrEmpty(entry.DbName))
+        {
+            var wsm = Regex.Match(cmd, @"[/-]WS\s*""([^""]+)""", RegexOptions.IgnoreCase);
+            if (!wsm.Success)
+                wsm = Regex.Match(cmd, @"[/-]WS\s+(\S+)", RegexOptions.IgnoreCase);
+            if (wsm.Success)
+            {
+                entry.DbType = "Веб";
+                entry.DbPath = wsm.Groups[1].Value;
+                entry.DbName = wsm.Groups[1].Value;
+            }
+        }
+
         // Пользователь 1С /N
-        var nm = Regex.Match(cmd, @"[/-]N\s+""([^""]+)""", RegexOptions.IgnoreCase);
+        var nm = Regex.Match(cmd, @"[/-]N\s*""([^""]+)""", RegexOptions.IgnoreCase);
         if (!nm.Success)
             nm = Regex.Match(cmd, @"[/-]N\s+(\S+)", RegexOptions.IgnoreCase);
         if (nm.Success) entry.User1C = nm.Groups[1].Value;
