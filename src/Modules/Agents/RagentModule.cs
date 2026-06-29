@@ -25,15 +25,30 @@ public class RagentEntry
     public bool IsRunning => Status == "Running";
 }
 
+public class RasEntry
+{
+    public string ServiceKey  { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string ImagePath   { get; set; } = "";
+    public string RasExe      { get; set; } = "";
+    public string Version     { get; set; } = "";
+    public int    RasPort     { get; set; } = 1545;
+    public string AgentAddr   { get; set; } = "localhost:1540";
+    public string Status      { get; set; } = "Unknown";
+    public bool   IsRunning   => Status == "Running";
+}
+
 public class RagentModule
 {
-    public List<RagentEntry> Entries { get; } = new();
+    public List<RagentEntry> Entries    { get; } = new();
+    public List<RasEntry>    RasEntries { get; } = new();
 
     // ── Сканирование ──────────────────────────────────────────────────────────
 
     public void Refresh()
     {
         Entries.Clear();
+        RasEntries.Clear();
         try
         {
             using var services = Registry.LocalMachine.OpenSubKey(
@@ -45,18 +60,63 @@ public class RagentModule
                 using var svc = services.OpenSubKey(name);
                 var img = svc?.GetValue("ImagePath") as string;
                 if (img == null) continue;
-                if (img.IndexOf("ragent", StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-                var entry = Parse(name, svc!, img);
-                if (entry != null) Entries.Add(entry);
+                if (img.IndexOf("ragent", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var entry = Parse(name, svc!, img);
+                    if (entry != null) Entries.Add(entry);
+                }
+                else if (img.IndexOf("ras.exe", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var entry = ParseRas(name, svc!, img);
+                    if (entry != null) RasEntries.Add(entry);
+                }
             }
 
             Entries.Sort((a, b) => a.Port.CompareTo(b.Port));
+            RasEntries.Sort((a, b) => a.RasPort.CompareTo(b.RasPort));
 
-            foreach (var e in Entries)
-                e.Status = QueryStatus(e.ServiceKey);
+            foreach (var e in Entries)    e.Status = QueryStatus(e.ServiceKey);
+            foreach (var e in RasEntries) e.Status = QueryStatus(e.ServiceKey);
         }
         catch (Exception ex) { Logger.Error($"RagentModule.Refresh: {ex.Message}"); }
+    }
+
+    private static RasEntry? ParseRas(string key, RegistryKey svc, string img)
+    {
+        var e = new RasEntry
+        {
+            ServiceKey  = key,
+            DisplayName = svc.GetValue("DisplayName") as string ?? key,
+            ImagePath   = img,
+        };
+
+        string args;
+        if (img.StartsWith("\""))
+        {
+            int end = img.IndexOf('"', 1);
+            if (end < 0) return null;
+            e.RasExe = img.Substring(1, end - 1);
+            args = img.Substring(end + 1).Trim();
+        }
+        else
+        {
+            int sp = img.IndexOf(' ');
+            if (sp < 0) { e.RasExe = img; args = ""; }
+            else { e.RasExe = img.Substring(0, sp); args = img.Substring(sp + 1).Trim(); }
+        }
+
+        foreach (var part in e.RasExe.Replace('/', '\\').Split('\\'))
+            if (Regex.IsMatch(part, @"^\d+\.\d+\.\d+\.\d+$")) { e.Version = part; break; }
+
+        var portM = Regex.Match(args, @"--port[=\s]+(\d+)", RegexOptions.IgnoreCase);
+        if (portM.Success && int.TryParse(portM.Groups[1].Value, out int p)) e.RasPort = p;
+
+        // адрес агента — последний токен вида host:port
+        var addrM = Regex.Match(args, @"(\S+:\d+)\s*$");
+        if (addrM.Success) e.AgentAddr = addrM.Groups[1].Value;
+
+        return e;
     }
 
     private static RagentEntry? Parse(string key, RegistryKey svc, string img)
@@ -120,6 +180,31 @@ public class RagentModule
     }
 
     // ── Поиск установленных версий 1С ─────────────────────────────────────────
+
+    public static List<(string Version, string RasExe)> FindRasVersions()
+    {
+        var result = new List<(string Version, string RasExe)>();
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        }.Where(r => !string.IsNullOrEmpty(r)).Distinct();
+
+        foreach (var root in roots)
+        {
+            var dir1cv8 = Path.Combine(root, "1cv8");
+            if (!Directory.Exists(dir1cv8)) continue;
+            foreach (var ver in Directory.GetDirectories(dir1cv8))
+            {
+                var exe = Path.Combine(ver, "bin", "ras.exe");
+                if (File.Exists(exe))
+                    result.Add((Path.GetFileName(ver), exe));
+            }
+        }
+
+        result.Sort((a, b) => string.Compare(b.Version, a.Version, StringComparison.OrdinalIgnoreCase));
+        return result;
+    }
 
     public static List<(string Version, string RagentExe)> FindVersions()
     {
@@ -332,6 +417,55 @@ public class RagentModule
         }
     }
 
+    // ── RAS: создание / удаление ──────────────────────────────────────────────
+
+    public string? CreateRas(string rasExe, int rasPort, string agentAddr,
+        string? account, string? password)
+    {
+        try
+        {
+            string version = "";
+            foreach (var part in rasExe.Replace('/', '\\').Split('\\'))
+                if (Regex.IsMatch(part, @"^\d+\.\d+\.\d+\.\d+$")) { version = part; break; }
+
+            var key     = $"1C_RAS_{rasPort}";
+            var display = string.IsNullOrEmpty(version)
+                ? $"1C:Enterprise RAS :{rasPort}"
+                : $"1C:Enterprise RAS {version} :{rasPort}";
+            var binPath = $"\"{rasExe}\" cluster --service --port={rasPort} {agentAddr}";
+
+            var err = ScmCreate(key, display, binPath,
+                string.IsNullOrEmpty(account)  ? null : account,
+                string.IsNullOrEmpty(password) ? null : password);
+            if (err != null) return err;
+
+            Logger.Info($"RAS: создана служба {key} порт {rasPort}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"RagentModule.CreateRas: {ex.Message}");
+            return ex.Message;
+        }
+    }
+
+    public string? DeleteRas(string key)
+    {
+        try
+        {
+            StopService(key);
+            var err = ScmDelete(key);
+            if (err != null) return err;
+            Logger.Info($"RAS: удалена служба {key}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"RagentModule.DeleteRas: {ex.Message}");
+            return ex.Message;
+        }
+    }
+
     // ── Win32 SCM P/Invoke ────────────────────────────────────────────────────
 
     private const uint SC_MANAGER_ALL_ACCESS     = 0xF003F;
@@ -389,7 +523,8 @@ public class RagentModule
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool CloseServiceHandle(IntPtr h);
 
-    private static string? ScmCreate(string key, string display, string binPath)
+    private static string? ScmCreate(string key, string display, string binPath,
+        string? account = null, string? password = null)
     {
         var hScm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
         if (hScm == IntPtr.Zero)
@@ -398,7 +533,7 @@ public class RagentModule
         {
             var hSvc = CreateService(hScm, key, display, SERVICE_ALL_ACCESS,
                 SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
-                binPath, null, IntPtr.Zero, null, null, null);
+                binPath, null, IntPtr.Zero, null, account, password);
             if (hSvc == IntPtr.Zero)
                 return $"CreateService: {Marshal.GetLastWin32Error()}";
             CloseServiceHandle(hSvc);

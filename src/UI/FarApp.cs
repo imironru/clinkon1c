@@ -927,17 +927,52 @@ public class FarApp
             items.Add(new NavItem
             {
                 Name        = e.DisplayName,
-                BaseName    = e.ServiceKey,           // ключ для операций
-                PathType    = e.Version,              // версия 1С (переиспользуем поле)
-                Description = StatusDisplay(e.Status), // статус
+                BaseName    = e.ServiceKey,
+                PathType    = e.Version,
+                Description = StatusDisplay(e.Status),
+                ShowDescCol = true,
                 CanEnter    = true,
             });
         }
 
+        // ── RAS ──────────────────────────────────────────────────────────────
+        items.Add(new NavItem { Name = "── RAS (Remote Server) ─────────────────────", IsDead = true });
+
+        foreach (var e in _agents.RasEntries)
+        {
+            items.Add(new NavItem
+            {
+                Name        = e.DisplayName,
+                BaseName    = "RAS:" + e.ServiceKey,
+                PathType    = e.Version,
+                Description = StatusDisplay(e.Status),
+                ShowDescCol = true,
+                CanEnter    = true,
+            });
+        }
+
+        var installedVers = _agents.RasEntries
+            .Select(r => r.Version).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (ver, exe) in RagentModule.FindRasVersions())
+        {
+            if (installedVers.Contains(ver)) continue;
+            items.Add(new NavItem
+            {
+                Name        = $"+ Установить RAS {ver}",
+                BaseName    = $"INSTALL_RAS:{ver}|{exe}",
+                Description = "не зарегистрирован",
+                ShowDescCol = true,
+                CanEnter    = true,
+            });
+        }
+
+        if (_agents.RasEntries.Count == 0 && RagentModule.FindRasVersions().Count == 0)
+            items.Add(new NavItem { Name = "(ras.exe не найден)", IsDead = true });
+
         return new NavLevel
         {
             Kind  = NavLevelKind.AgentsRoot,
-            Title = $"Агенты сервера 1С [{_agents.Entries.Count}]",
+            Title = $"Агенты [{_agents.Entries.Count}]  RAS [{_agents.RasEntries.Count}]",
             Items = items
         };
     }
@@ -1181,7 +1216,12 @@ public class FarApp
                 break;
 
             case NavLevelKind.AgentsRoot:
-                DoAgentInfo(item.BaseName);
+                if (item.BaseName?.StartsWith("RAS:") == true)
+                    DoRasInfo(item.BaseName.Substring(4));
+                else if (item.BaseName?.StartsWith("INSTALL_RAS:") == true)
+                    DoRasInstall(item.BaseName.Substring(12));
+                else
+                    DoAgentInfo(item.BaseName);
                 break;
 
             case NavLevelKind.ProcessesRoot:
@@ -3095,6 +3135,161 @@ public class FarApp
         if (err != null) { ConsoleDialog.ShowText("Ошибка удаления", err); R.Invalidate(); }
         _agents.Refresh();
         RebuildCurrentLevel();
+    }
+
+    // ── RAS ───────────────────────────────────────────────────────────────────
+
+    private void DoRasInfo(string key)
+    {
+        RasEntry? GetE() => _agents.RasEntries.FirstOrDefault(x => x.ServiceKey == key);
+        if (GetE() == null) return;
+
+        const string keyHint = "[S] Старт  [T] Стоп  [R] Рестарт  [Del] Удалить службу  Esc — закрыть";
+
+        ConsoleDialog.ShowTextWithKeys(
+            getInfo: () =>
+            {
+                var e = GetE();
+                return e == null
+                    ? ("RAS", "(не найден)")
+                    : ($"RAS: {e.DisplayName}", BuildRasInfoText(e));
+            },
+            keyHint: keyHint,
+            onKey: (k, _) =>
+            {
+                var e = GetE();
+                if (e == null) return false;
+
+                if (k == ConsoleKey.S) { AgentServiceOp2(e.ServiceKey, e.DisplayName, "start"); _agents.Refresh(); return true; }
+                if (k == ConsoleKey.T) { AgentServiceOp2(e.ServiceKey, e.DisplayName, "stop");  _agents.Refresh(); return true; }
+                if (k == ConsoleKey.R) { AgentServiceOp2(e.ServiceKey, e.DisplayName, "restart"); _agents.Refresh(); return true; }
+                if (k == ConsoleKey.Delete)
+                {
+                    if (!ConsoleDialog.Confirm("Удалить RAS",
+                        $"Снять с регистрации и удалить службу?\n\n{e.DisplayName}"))
+                        return true;
+                    string? err = null;
+                    ConsoleDialog.ShowProgress($"Удаление: {e.DisplayName}", _ => err = _agents.DeleteRas(e.ServiceKey));
+                    if (err != null) ConsoleDialog.ShowText("Ошибка удаления", err);
+                    else ConsoleDialog.ShowText("Готово", $"✓ Служба RAS удалена:\n{e.DisplayName}");
+                    _agents.Refresh();
+                    RebuildCurrentLevel();
+                    return false;
+                }
+                return true;
+            }
+        );
+
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private void DoRasInstall(string verAndExe)
+    {
+        var parts = verAndExe.Split('|');
+        if (parts.Length < 2) return;
+        var version = parts[0];
+        var rasExe  = parts[1];
+
+        var fields = new (string Key, string Label)[]
+        {
+            ("port",   "RAS порт"),
+            ("agent",  "Адрес агента"),
+            ("user",   "Пользователь (пусто = LocalSystem)"),
+            ("pwd",    "Пароль"),
+        };
+        var defaults = new Dictionary<string, string>
+        {
+            ["port"]  = "1545",
+            ["agent"] = "localhost:1540",
+            ["user"]  = @".\USR1CV8",
+            ["pwd"]   = "",
+        };
+
+        var vals = ConsoleDialog.Form($"Установить RAS {version}", fields, defaults);
+        if (vals == null) return;
+
+        if (!int.TryParse(vals["port"], out int rasPort) || rasPort < 1 || rasPort > 65535)
+        {
+            ConsoleDialog.ShowText("Ошибка", "Некорректный порт.");
+            return;
+        }
+
+        string? err = null;
+        ConsoleDialog.ShowProgress($"Регистрация RAS {version}...", _ =>
+            err = _agents.CreateRas(rasExe, rasPort, vals["agent"], vals["user"], vals["pwd"]));
+
+        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); return; }
+
+        ConsoleDialog.ShowText("Готово",
+            $"✓ RAS зарегистрирован.\n\nВерсия: {version}\nПорт: {rasPort}\n\nВ списке нажмите [S] для запуска.");
+
+        _agents.Refresh();
+        RebuildCurrentLevel();
+    }
+
+    private static string BuildRasInfoText(RasEntry e)
+    {
+        int w = Math.Min(Console.WindowWidth - 4, 78) - 4;
+
+        var pairs = new List<(string k, string v)>
+        {
+            ("Служба",   e.ServiceKey),
+            ("Имя",      e.DisplayName),
+            ("Версия 1С",e.Version),
+            ("RAS порт", e.RasPort.ToString()),
+            ("Агент",    e.AgentAddr),
+            ("Статус",   StatusDisplay(e.Status)),
+        };
+
+        int keyW = pairs.Max(p => p.k.Length);
+        int valW = Math.Max(8, w - keyW - 3);
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var (k, v) in pairs)
+        {
+            var lines = WordWrapVal(v, valW);
+            for (int i = 0; i < lines.Length; i++)
+                sb.AppendLine(i == 0
+                    ? $"{k.PadRight(keyW)} : {lines[i]}"
+                    : $"{new string(' ', keyW + 3)}{lines[i]}");
+        }
+
+        if (!string.IsNullOrEmpty(e.ImagePath))
+        {
+            sb.AppendLine();
+            sb.AppendLine("Команда:");
+            foreach (var cl in WordWrapVal(e.ImagePath, w - 2))
+                sb.AppendLine("  " + cl);
+        }
+
+        return sb.ToString();
+    }
+
+    private void AgentServiceOp2(string serviceKey, string displayName, string op)
+    {
+        if (op is "stop" or "restart")
+        {
+            var q = op == "stop" ? "Остановить" : "Перезапустить";
+            if (!ConsoleDialog.Confirm($"{q} службу", $"{q}?\n\n{displayName}")) return;
+        }
+
+        var title = op switch { "start" => "Запуск", "stop" => "Остановка", _ => "Перезапуск" };
+        string? err = null;
+        ConsoleDialog.ShowProgress($"{title}: {displayName}", _ =>
+        {
+            err = op switch
+            {
+                "start"   => _agents.StartService(serviceKey),
+                "stop"    => _agents.StopService(serviceKey),
+                "restart" => _agents.RestartService(serviceKey),
+                _         => null
+            };
+        });
+
+        var doneTitle = op switch { "start" => "Запущено", "stop" => "Остановлено", _ => "Перезапущено" };
+        if (err != null) ConsoleDialog.ShowText($"Ошибка: {title.ToLower()}", err);
+        else ConsoleDialog.ShowText(doneTitle, $"✓ {doneTitle}:\n{displayName}");
     }
 
     // ── Лог ───────────────────────────────────────────────────────────────────
