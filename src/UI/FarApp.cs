@@ -979,38 +979,26 @@ public class FarApp
 
     private NavLevel MakeEmulatorsLevel()
     {
-        var found = _emulators.Found;
         var items = new List<NavItem> { UpItem() };
 
-        if (found.Count == 0)
+        foreach (var e in _emulators.Entries)
         {
             items.Add(new NavItem
             {
-                Name        = "(эмуляторов не обнаружено)",
-                CanEnter    = false,
-                ShowDescCol = false
+                Name        = e.Name,
+                Description = e.Found ? e.Summary() : "не обнаружен",
+                ShowDescCol = true,
+                CanEnter    = e.Found,
+                IsDead      = !e.Found,
+                BaseName    = e.Name
             });
         }
-        else
-        {
-            foreach (var e in found)
-            {
-                items.Add(new NavItem
-                {
-                    Name        = e.Name,
-                    Description = e.Summary(),
-                    ShowDescCol = true,
-                    CanEnter    = true,
-                    BaseName    = e.Name
-                });
-            }
-        }
 
+        int foundCount = _emulators.Found.Count;
         return new NavLevel
         {
             Kind  = NavLevelKind.EmulatorsRoot,
-            Title = $"Эмуляторы HASP  [{found.Count} найдено из {EmulatorModule.KnownEmulators.Length}]"
-        ,
+            Title = $"Эмуляторы HASP  [{foundCount} найдено из {EmulatorModule.KnownEmulators.Length}]",
             Items = items
         };
     }
@@ -3109,16 +3097,14 @@ public class FarApp
         }
         else
         {
+            // заголовок таблицы
+            lines.Add(("  Версия          Серв  Толст  Тонк   COM    Веб  ibcmd", ConsoleColor.Gray));
             foreach (var v in d.Versions)
             {
-                var tags = new System.Text.StringBuilder();
-                if (v.HasServer) tags.Append("[Сервер]");
-                if (v.HasThick)  tags.Append("[Толст]");
-                if (v.HasThin)   tags.Append("[Тонк]");
-                if (v.HasCom)    tags.Append($"[COM {v.ComVer}]");
-                if (v.HasWeb)    tags.Append("[Веб]");
-                if (v.HasIbcmd)  tags.Append("[ibcmd]");
-                lines.Add(($"  [✓]  {v.Version}  {tags}", ConsoleColor.White));
+                string s(bool f) => f ? "[✓]" : "[ ]";
+                string com = v.HasCom && v.ComVer != null ? $"[{v.ComVer}]" : "[ ]  ";
+                string row = $"  {v.Version,-14}  {s(v.HasServer)}   {s(v.HasThick)}   {s(v.HasThin)}  {com,-6} {s(v.HasWeb)}  {s(v.HasIbcmd)}";
+                lines.Add((row, ConsoleColor.White));
             }
         }
         lines.Add(("", R.PanelFg));
