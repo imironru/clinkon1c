@@ -4,6 +4,7 @@ using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Configs;
+using Clinkon1C.Modules.Diagnostics;
 using Clinkon1C.Modules.Emulators;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
@@ -77,9 +78,10 @@ public class FarApp
     private readonly LicensesModule  _licenses;
     private readonly RagentModule    _agents;
     private readonly ProcessesModule _processes;
-    private readonly WebModule       _web;
-    private readonly EmulatorModule  _emulators;
-    private readonly ConfigsModule   _configs;
+    private readonly WebModule          _web;
+    private readonly EmulatorModule     _emulators;
+    private readonly ConfigsModule      _configs;
+    private readonly DiagnosticsModule  _diagnostics;
     private readonly string?         _updateNotice;
 
     // Отмеченные базы (по Connect= строке как ключу)
@@ -111,6 +113,7 @@ public class FarApp
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
                   LicensesModule licenses, RagentModule agents, ProcessesModule processes,
                   WebModule web, EmulatorModule emulators, ConfigsModule configs,
+                  DiagnosticsModule diagnostics,
                   string? updateNotice = null)
     {
         _cache        = cache;
@@ -122,6 +125,7 @@ public class FarApp
         _web          = web;
         _emulators    = emulators;
         _configs      = configs;
+        _diagnostics  = diagnostics;
         _updateNotice = updateNotice;
         Logger.MessageLogged += OnLog;
     }
@@ -136,6 +140,7 @@ public class FarApp
         {
             R.Init();
             Rescan();
+            _diagnostics.ScanAsync();
 
             while (_running)
             {
@@ -1326,6 +1331,11 @@ public class FarApp
                     ConsoleDialog.ShowProgress("Обновление...", _ => _configs.Refresh());
                     R.Invalidate();
                     RebuildCurrentLevel();
+                }
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.Home)
+                {
+                    ConsoleDialog.ShowProgress("Сканирование системы...", _ => _diagnostics.ScanSync());
+                    R.Invalidate();
                 }
                 else
                     Rescan();
@@ -2934,9 +2944,15 @@ public class FarApp
     // ── Рисование ─────────────────────────────────────────────────────────────
     private void Draw()
     {
-        R.CheckResize();   // переинициализируем буфер если терминал изменился
+        R.CheckResize();
 
         var lvl = _nav.Peek();
+        if (lvl.Kind == NavLevelKind.Home)
+        {
+            DrawHome(lvl);
+            return;
+        }
+
         DrawHeader();
         R.BoxTop(1, lvl.Title);
         DrawColHeader();
@@ -2947,8 +2963,174 @@ public class FarApp
         R.BoxBottom(BotBorder);
         DrawMsg();
         DrawKeyBar();
+        R.Flush();
+    }
 
-        R.Flush();         // отправляем в терминал только изменившиеся ячейки
+    private void DrawHome(NavLevel lvl)
+    {
+        DrawHeader();
+        R.SplitTop(1, lvl.Title, "Сводка системы");
+        R.SplitRow(2, "", R.PanelFg, R.PanelBg, "", R.PanelFg, R.PanelBg);
+        R.SplitSep(3);
+
+        var diagLines = BuildDiagLines();
+        for (int row = ItemTop; row <= ItemBot; row++)
+        {
+            int idx = lvl.ScrollTop + (row - ItemTop);
+
+            // ── левая панель: пункт меню ───────────────────────────────────
+            string leftContent = "";
+            ConsoleColor lfg = R.PanelFg, lbg = R.PanelBg;
+            if (idx < lvl.Items.Count)
+            {
+                var item     = lvl.Items[idx];
+                bool isCursor = idx == lvl.Cursor;
+                string arrow = item.CanEnter ? "►" : " ";
+                string size  = item.SizeBytes > 0
+                    ? SafeDelete.FormatSize(item.SizeBytes).PadLeft(10)
+                    : (item.Description != null ? item.Description.PadLeft(10) : "          ");
+                leftContent  = $" {arrow} {item.Name}";
+                // показываем размер если есть место
+                int nameAvail = R.LeftInnerW - 4;
+                string nameStr = R.Fit(item.Name, nameAvail - 11);
+                leftContent = $" {arrow} {nameStr}{size}";
+                lfg = isCursor ? R.CurFg : R.PanelFg;
+                lbg = isCursor ? R.CurBg : R.PanelBg;
+            }
+
+            // ── правая панель: строка диагностики ─────────────────────────
+            string rightContent = "";
+            ConsoleColor rfg = R.PanelFg;
+            int dIdx = row - ItemTop;
+            if (dIdx < diagLines.Count)
+            {
+                rightContent = diagLines[dIdx].Text;
+                rfg          = diagLines[dIdx].Fg;
+            }
+
+            R.SplitRow(row, leftContent, lfg, lbg, rightContent, rfg, R.PanelBg);
+        }
+
+        R.SplitSep(SepBot);
+        R.SplitRow(InfoRow,
+            "  [Enter] Открыть  [F5] Обновить сводку  [F10] Выход",
+            R.HdrFg, R.HdrBg,
+            "", R.HdrFg, R.HdrBg);
+        R.SplitBottom(BotBorder);
+        DrawMsg();
+        DrawKeyBar();
+        R.Flush();
+    }
+
+    private List<(string Text, ConsoleColor Fg)> BuildDiagLines()
+    {
+        var lines = new List<(string, ConsoleColor)>();
+        var d = _diagnostics.Data;
+
+        if (d.IsScanning)
+        {
+            lines.Add(("  Сканирование системы...", ConsoleColor.Gray));
+            return lines;
+        }
+        if (d.ScanError != null)
+        {
+            lines.Add(("  Ошибка: " + d.ScanError, ConsoleColor.Red));
+            return lines;
+        }
+
+        // ── Версии 1С ────────────────────────────────────────────────────
+        lines.Add((" Версии 1С платформы", ConsoleColor.Cyan));
+        if (d.Versions.Count == 0)
+        {
+            lines.Add(("  — не обнаружено", ConsoleColor.DarkGray));
+        }
+        else
+        {
+            foreach (var v in d.Versions)
+            {
+                var tags = new System.Text.StringBuilder();
+                if (v.HasServer) tags.Append("[Сервер]");
+                if (v.HasThick)  tags.Append("[Толст]");
+                if (v.HasThin)   tags.Append("[Тонк]");
+                if (v.HasCom)    tags.Append($"[COM {v.ComVer}]");
+                if (v.HasWeb)    tags.Append("[Веб]");
+                if (v.HasIbcmd)  tags.Append("[ibcmd]");
+                lines.Add(($"  {v.Version}  {tags}", ConsoleColor.White));
+            }
+        }
+        lines.Add(("", R.PanelFg));
+
+        // ── Веб-серверы ──────────────────────────────────────────────────
+        lines.Add((" Веб-серверы", ConsoleColor.Cyan));
+        foreach (var ws in d.WebServers)
+        {
+            if (!ws.IsInstalled)
+            {
+                lines.Add(($"  —  {ws.Name,-16} не установлен", ConsoleColor.DarkGray));
+            }
+            else
+            {
+                string ver = ws.Version != null ? $" {ws.Version}" : "";
+                string st  = ws.IsRunning ? "работает" : "остановлен";
+                ConsoleColor c = ws.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
+                lines.Add(($"  ✓  {ws.Name + ver,-16} {st}", c));
+            }
+        }
+        lines.Add(("", R.PanelFg));
+
+        // ── СУБД ─────────────────────────────────────────────────────────
+        lines.Add((" СУБД", ConsoleColor.Cyan));
+        foreach (var db in d.Databases)
+        {
+            if (!db.IsInstalled)
+            {
+                lines.Add(($"  —  {db.Name,-22} не установлен", ConsoleColor.DarkGray));
+            }
+            else
+            {
+                string ver   = db.Version != null ? $" {db.Version}" : "";
+                string st    = db.IsRunning ? "работает" : "остановлен";
+                string admin = db.HasAdminTool ? "  SSMS/pgAdmin: ✓" : "";
+                ConsoleColor c = db.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
+                lines.Add(($"  ✓  {db.Name + ver,-22} {st}{admin}", c));
+            }
+        }
+        lines.Add(("", R.PanelFg));
+
+        // ── Сервисы 1С ───────────────────────────────────────────────────
+        lines.Add((" Сервисы 1С", ConsoleColor.Cyan));
+        if (d.Services.Count == 0)
+        {
+            lines.Add(("  — сервисы не обнаружены", ConsoleColor.DarkGray));
+        }
+        else
+        {
+            foreach (var svc in d.Services)
+            {
+                string st   = svc.IsRunning ? "работает" : "остановлен";
+                string port = svc.Port != null ? $"  :{svc.Port}" : "";
+                ConsoleColor c = svc.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
+                string prefix  = svc.IsRunning ? "✓" : "✗";
+                // убираем длинный префикс "1C:Enterprise 8.3 Server" → оставляем версию и тип
+                string name = svc.DisplayName.Length > 30
+                    ? svc.DisplayName.Substring(0, 29) + "…"
+                    : svc.DisplayName;
+                lines.Add(($"  {prefix}  {name,-30} {st}{port}", c));
+            }
+        }
+        lines.Add(("", R.PanelFg));
+
+        // ── Порты ────────────────────────────────────────────────────────
+        if (d.Ports.Count > 0)
+        {
+            lines.Add((" Порты", ConsoleColor.Cyan));
+            var portLine = new System.Text.StringBuilder("  ");
+            foreach (var (port, label, open) in d.Ports)
+                portLine.Append($"{port}{(open ? "✓" : "✗")}  ");
+            lines.Add((portLine.ToString().TrimEnd(), ConsoleColor.White));
+        }
+
+        return lines;
     }
 
     private void DrawHeader()

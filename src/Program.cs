@@ -7,6 +7,7 @@ using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
 using Clinkon1C.Modules.Configs;
+using Clinkon1C.Modules.Diagnostics;
 using Clinkon1C.Modules.Emulators;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
@@ -139,9 +140,10 @@ class Program
             var agents    = new RagentModule();
             var processes = new ProcessesModule();
             var web       = new WebModule();
-            var emulators = new EmulatorModule();
-            var configs   = new ConfigsModule();
-            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, updateNotice).Run();
+            var emulators    = new EmulatorModule();
+            var configs      = new ConfigsModule();
+            var diagnostics  = new DiagnosticsModule();
+            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, diagnostics, updateNotice).Run();
         }
         finally
         {

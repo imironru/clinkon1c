@@ -225,4 +225,45 @@ internal static class R
         Put(1,      y, Fit(content, _w - 2), fg, bg);
         Set(_w - 1, y, '║', BorderFg, PanelBg);
     }
+
+    // ── Split-панель (главный экран: 1/3 меню | 2/3 сводка) ─────────────────
+
+    public static int LeftInnerW  => _w / 3;
+    public static int SplitDivX   => 1 + LeftInnerW;
+    public static int RightInnerW => _w - SplitDivX - 2;
+
+    public static void SplitTop(int y, string? leftTitle, string? rightTitle)
+    {
+        var lt   = string.IsNullOrEmpty(leftTitle)  ? "" : "══ " + leftTitle  + " ";
+        var rt   = string.IsNullOrEmpty(rightTitle) ? "" : "══ " + rightTitle + " ";
+        int lRem = Math.Max(0, LeftInnerW  - lt.Length);
+        int rRem = Math.Max(0, RightInnerW - rt.Length);
+        Put(0, y,
+            "╔" + lt + new string('═', lRem)
+          + "╦" + rt + new string('═', rRem)
+          + "╗", BorderFg, PanelBg);
+    }
+
+    public static void SplitSep(int y) =>
+        Put(0, y,
+            "╠" + new string('═', LeftInnerW)
+          + "╬" + new string('═', RightInnerW)
+          + "╣", BorderFg, PanelBg);
+
+    public static void SplitBottom(int y) =>
+        Put(0, y,
+            "╚" + new string('═', LeftInnerW)
+          + "╩" + new string('═', RightInnerW)
+          + "╝", BorderFg, PanelBg);
+
+    public static void SplitRow(int y,
+        string leftContent,  ConsoleColor lfg, ConsoleColor lbg,
+        string rightContent, ConsoleColor rfg, ConsoleColor rbg)
+    {
+        Set(0,          y, '║', BorderFg, PanelBg);
+        Put(1,          y, Fit(leftContent,  LeftInnerW),  lfg, lbg);
+        Set(SplitDivX,  y, '║', BorderFg, PanelBg);
+        Put(SplitDivX + 1, y, Fit(rightContent, RightInnerW), rfg, rbg);
+        Set(_w - 1,     y, '║', BorderFg, PanelBg);
+    }
 }
