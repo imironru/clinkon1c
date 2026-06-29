@@ -426,18 +426,44 @@ class Program
 
             var currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName;
             var currentDir = Path.GetDirectoryName(currentExe)!;
-            // Имя нового файла берём из релиза (содержит версию), не из имени текущего процесса
             var assetName  = !string.IsNullOrEmpty(upd.AssetName) ? upd.AssetName : Path.GetFileName(currentExe);
             var newExePath = Path.Combine(currentDir, assetName);
             var tempFile   = Path.Combine(Path.GetTempPath(), "Clinkon1C_update.exe");
 
+            Logger.Info($"Обновление: скачиваем {upd.AssetName} v{upd.Version} из {upd.DownloadUrl}");
+
             using var client = new HttpClient();
             client.DefaultRequestHeaders.Add("User-Agent", $"Clinkon1C/{VERSION}");
             client.Timeout = TimeSpan.FromMinutes(5);
-            var bytes = client.GetByteArrayAsync(upd.DownloadUrl).GetAwaiter().GetResult();
-            File.WriteAllBytes(tempFile, bytes);
 
-            Console.SetCursorPosition(2, 3);
+            using var response = client.GetAsync(upd.DownloadUrl,
+                HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+            response.EnsureSuccessStatusCode();
+
+            long total   = response.Content.Headers.ContentLength ?? 0;
+            long received = 0;
+            var tempStream = File.OpenWrite(tempFile);
+            using (tempStream)
+            using (var netStream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
+            {
+                var buf = new byte[81920];
+                int read;
+                while ((read = netStream.Read(buf, 0, buf.Length)) > 0)
+                {
+                    tempStream.Write(buf, 0, read);
+                    received += read;
+                    if (total > 0)
+                    {
+                        int pct = (int)(received * 100 / total);
+                        string bar = new string('█', pct / 5).PadRight(20);
+                        Console.SetCursorPosition(2, 3);
+                        Console.Write($"[{bar}] {pct,3}%  {received / 1024} / {total / 1024} КБ  ");
+                    }
+                }
+            }
+            Logger.Info($"Обновление: скачано {received / 1024} КБ → {tempFile}");
+
+            Console.SetCursorPosition(2, 4);
             Console.Write("Применение обновления...");
 
             // Bat-скрипт: ждёт выхода текущего процесса, кладёт новый exe рядом под правильным именем
