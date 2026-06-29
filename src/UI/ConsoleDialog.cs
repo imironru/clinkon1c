@@ -1,29 +1,34 @@
 namespace Clinkon1C.UI;
 
-/// <summary>
-/// FAR-подобные диалоги. Пишут напрямую в Console (минуя буфер).
-/// После закрытия диалога вызывай R.Invalidate() чтобы восстановить панель.
-/// </summary>
+// Все публичные методы вызывают R.Invalidate() перед выходом —
+// вызывающий код не должен заботиться о восстановлении экрана.
 internal static class ConsoleDialog
 {
     // ── Confirm Y/N ──────────────────────────────────────────────────────────
     public static bool Confirm(string title, string message)
     {
         Draw(title, message.Split('\n'), "[Y/Д] Да    [N/Н/Esc] Нет");
+        bool result = false;
         while (true)
         {
             var k = Console.ReadKey(true);
             char c = k.KeyChar;
-            if (k.Key == ConsoleKey.Y || c == 'y' || c == 'Y' || c == 'д' || c == 'Д') return true;
-            if (k.Key == ConsoleKey.N || c == 'n' || c == 'N' || c == 'н' || c == 'Н') return false;
-            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)                   return false;
+            if (k.Key == ConsoleKey.Y || c == 'y' || c == 'Y' || c == 'д' || c == 'Д')
+                { result = true; break; }
+            if (k.Key == ConsoleKey.N || c == 'n' || c == 'N' || c == 'н' || c == 'Н')
+                break;
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
+                break;
         }
+        R.Invalidate();
+        return result;
     }
 
     // ── Confirm + ввод слова ─────────────────────────────────────────────────
     public static bool ConfirmWord(string title, string message, string word)
     {
         var input = new System.Text.StringBuilder();
+        bool result = false;
         while (true)
         {
             var lines = message.Split('\n').ToList();
@@ -33,18 +38,19 @@ internal static class ConsoleDialog
             Draw(title, lines.ToArray(), "[Enter] OK    [Esc] Отмена");
 
             var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Escape) return false;
+            if (k.Key == ConsoleKey.Escape) break;
             if (k.Key == ConsoleKey.Enter)
-                return string.Equals(input.ToString(), word, StringComparison.Ordinal);
+                { result = string.Equals(input.ToString(), word, StringComparison.Ordinal); break; }
             if (k.Key == ConsoleKey.Backspace && input.Length > 0)
                 input.Remove(input.Length - 1, 1);
             else if (!char.IsControl(k.KeyChar))
                 input.Append(k.KeyChar);
         }
+        R.Invalidate();
+        return result;
     }
 
     // ── Текст со скроллом (Dry Run, Help, Info) ──────────────────────────────
-    /// <param name="onSave">Если задан — в подсказке появится [S] Сохранить, нажатие вызывает callback.</param>
     public static void ShowText(string title, string text, Action? onSave = null)
     {
         int w   = Math.Min(Console.WindowWidth - 4, 78);
@@ -63,72 +69,10 @@ internal static class ConsoleDialog
             if (onSave != null && (k.Key == ConsoleKey.S || k.KeyChar == 's' || k.KeyChar == 'S'))
                 onSave();
         }
+        R.Invalidate();
     }
 
-    // ── Внутренние методы ─────────────────────────────────────────────────────
-    private static void Draw(string title, string[] lines, string buttons)
-    {
-        int w   = Math.Min(Console.WindowWidth - 4, 72);
-        int h   = lines.Length + 5; // top + title row (inside) + sep + lines + buttons + bottom
-        h       = Math.Min(h, Console.WindowHeight - 2);
-        int x   = (Console.WindowWidth  - w) / 2;
-        int y   = (Console.WindowHeight - h) / 2;
-
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Top(x, y, w, title);
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-
-        // Текст
-        for (int i = 0; i < lines.Length && y + 2 + i < y + h - 2; i++)
-        {
-            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-            Pos(x + 2, y + 2 + i);
-            Console.Write(R.Fit(lines[i], w - 4));
-        }
-
-        // Кнопки
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        int bx = x + (w - buttons.Length) / 2;
-        Pos(bx, y + h - 2);
-        Console.Write(buttons);
-    }
-
-    private static void DrawScroll(string title, string[] lines, int scroll,
-        bool hasSave = false, string? overrideHint = null)
-    {
-        int w      = Math.Min(Console.WindowWidth - 4, 78);
-        int innerH = Console.WindowHeight - 6;
-        int h      = innerH + 4;
-        int x      = (Console.WindowWidth  - w) / 2;
-        int y      = 1;
-
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Top(x, y, w, title);
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-
-        for (int i = 0; i < innerH; i++)
-        {
-            int li = scroll + i;
-            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-            Pos(x + 2, y + 2 + i);
-            Console.Write(R.Fit(li < lines.Length ? lines[li] : "", w - 4));
-        }
-
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        Pos(x + 2, y + h - 2);
-        var hint = overrideHint ?? (hasSave
-            ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
-            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть");
-        Console.Write(R.Fit(hint, w - 4));
-    }
-
-    /// <summary>
-    /// Скролл-диалог с интерактивными клавишами. Контент/заголовок перечитываются после каждого
-    /// вызова onKey — позволяет обновить данные (например, после перезапуска службы).
-    /// onKey возвращает true чтобы остаться в диалоге, false — закрыть.
-    /// </summary>
+    // ── Скролл с интерактивными клавишами ────────────────────────────────────
     public static void ShowTextWithKeys(Func<(string title, string content)> getInfo,
         string keyHint, Func<ConsoleKey, char, bool>? onKey = null)
     {
@@ -155,10 +99,10 @@ internal static class ConsoleDialog
 
             if (onKey != null && !onKey(k.Key, k.KeyChar)) break;
         }
+        R.Invalidate();
     }
 
-    // ── Мультиселект ────────────────────────────────────────────────────────
-    /// <summary>Диалог с чекбоксами. Возвращает индексы отмеченных элементов.</summary>
+    // ── Мультиселект ─────────────────────────────────────────────────────────
     public static List<int> MultiSelect(string title, string[] items,
         IEnumerable<int>? preselected = null)
     {
@@ -173,16 +117,15 @@ internal static class ConsoleDialog
         int h       = visible + 5;
         int x       = (Console.WindowWidth  - w) / 2;
         int y       = Math.Max(0, (Console.WindowHeight - h) / 2);
+        List<int> result = new();
 
         while (true)
         {
-            // Рамка
             CC(ConsoleColor.White, ConsoleColor.DarkBlue);
             Top(x, y, w, title);
             for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
             Bot(x, y + h - 1, w);
 
-            // Список
             for (int i = 0; i < visible; i++)
             {
                 int idx = scroll + i;
@@ -196,7 +139,6 @@ internal static class ConsoleDialog
                 Console.Write(R.Fit(line, w - 4));
             }
 
-            // Подсказка
             CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
             Pos(x + 2, y + h - 2);
             Console.Write(R.Fit("[Пробел] Отметить  [A] Все  [Enter] OK  [Esc] Отмена", w - 4));
@@ -221,18 +163,18 @@ internal static class ConsoleDialog
             }
             else if (k.Key == ConsoleKey.Enter)
             {
-                var result = new List<int>();
                 for (int i = 0; i < marked.Length; i++)
                     if (marked[i]) result.Add(i);
-                return result;
+                break;
             }
             else if (k.Key == ConsoleKey.Escape)
-                return new List<int>();
+                break;
         }
+        R.Invalidate();
+        return result;
     }
 
     // ── Ввод текста ──────────────────────────────────────────────────────────
-    /// <summary>Диалог ввода текстовой строки. null = отмена.</summary>
     public static string? InputText(string title, string prompt, string defaultValue = "")
     {
         var input = new System.Text.StringBuilder(defaultValue);
@@ -241,6 +183,7 @@ internal static class ConsoleDialog
         int h     = lines.Length + 6;
         int x     = (Console.WindowWidth  - w) / 2;
         int y     = Math.Max(0, (Console.WindowHeight - h) / 2);
+        string? result = null;
 
         while (true)
         {
@@ -255,7 +198,6 @@ internal static class ConsoleDialog
                 Console.Write(R.Fit(lines[i], w - 4));
             }
 
-            // Поле ввода
             int inputY = y + 2 + lines.Length + 1;
             CC(ConsoleColor.White, ConsoleColor.DarkBlue);
             Pos(x + 2, inputY - 1);
@@ -270,26 +212,24 @@ internal static class ConsoleDialog
             Pos(x + 2, y + h - 2);
             Console.Write(R.Fit("[Enter] Сохранить    [Esc] Отмена", w - 4));
 
-            // Курсор в конец введённого текста
-            Pos(x + 2 + 2 + display.Length, inputY); // 2 = "> "
+            Pos(x + 2 + 2 + display.Length, inputY);
             Console.CursorVisible = true;
 
             var k = Console.ReadKey(true);
             Console.CursorVisible = false;
-            if (k.Key == ConsoleKey.Enter)  return input.ToString();
-            if (k.Key == ConsoleKey.Escape) return null;
+            if (k.Key == ConsoleKey.Enter)  { result = input.ToString(); break; }
+            if (k.Key == ConsoleKey.Escape) break;
             if (k.Key == ConsoleKey.Backspace && input.Length > 0)
                 input.Remove(input.Length - 1, 1);
             else if (!char.IsControl(k.KeyChar))
                 input.Append(k.KeyChar);
         }
+        Console.CursorVisible = false;
+        R.Invalidate();
+        return result;
     }
 
     // ── Прогресс (блокирующий) ────────────────────────────────────────────────
-    /// <summary>
-    /// Показывает диалог с последним сообщением прогресса.
-    /// action вызывается синхронно; передаёт callback для обновления строки статуса.
-    /// </summary>
     public static void ShowProgress(string title, Action<Action<string>> action)
     {
         var msg   = "...";
@@ -301,21 +241,12 @@ internal static class ConsoleDialog
             Draw(title, lines, "");
         }
 
-        // Рисуем начальное состояние
         Redraw();
-
-        action(text =>
-        {
-            msg = text;
-            Redraw();
-        });
+        action(text => { msg = text; Redraw(); });
+        R.Invalidate();
     }
 
     // ── Многопольная форма ───────────────────────────────────────────────────
-    /// <summary>
-    /// Форма с несколькими полями ввода. ↑↓/Tab — переключение поля.
-    /// Возвращает словарь key→value или null при отмене.
-    /// </summary>
     public static Dictionary<string, string>? Form(string title, (string Key, string Label)[] fields,
         Dictionary<string, string>? defaults = null)
     {
@@ -332,6 +263,7 @@ internal static class ConsoleDialog
         int h       = fields.Length * 2 + 5;
         int x       = (Console.WindowWidth  - w) / 2;
         int y       = Math.Max(0, (Console.WindowHeight - h) / 2);
+        Dictionary<string, string>? result = null;
 
         while (true)
         {
@@ -359,7 +291,6 @@ internal static class ConsoleDialog
             Pos(x + 2, y + h - 2);
             Console.Write(R.Fit("[↑↓ Tab] Поле   [Enter] Подтвердить   [Esc] Отмена", w - 4));
 
-            // Позиционируем системный курсор в конец текста активного поля
             {
                 var activeVal = values[cursor];
                 if (activeVal.Length > inputW) activeVal = activeVal.Substring(activeVal.Length - inputW);
@@ -369,10 +300,13 @@ internal static class ConsoleDialog
 
             var k = Console.ReadKey(true);
             Console.CursorVisible = false;
-            if (k.Key == ConsoleKey.Escape) return null;
+            if (k.Key == ConsoleKey.Escape) break;
             if (k.Key == ConsoleKey.Enter)
-                return fields.Select((f, i) => (f.Key, values[i]))
-                             .ToDictionary(t => t.Key, t => t.Item2);
+            {
+                result = fields.Select((f, i) => (f.Key, values[i]))
+                               .ToDictionary(t => t.Key, t => t.Item2);
+                break;
+            }
             bool shiftTab = k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Shift) != 0;
             if (k.Key == ConsoleKey.UpArrow || shiftTab)
                 cursor = (cursor - 1 + fields.Length) % fields.Length;
@@ -383,10 +317,12 @@ internal static class ConsoleDialog
             else if (!char.IsControl(k.KeyChar))
                 values[cursor] += k.KeyChar;
         }
+        Console.CursorVisible = false;
+        R.Invalidate();
+        return result;
     }
 
     // ── Вставка многострочного блока (JWT/XML) ───────────────────────────────
-    /// <summary>Диалог сбора многострочного XML из буфера обмена. null = отмена.</summary>
     public static string? PasteBlock(string title)
     {
         var sb = new System.Text.StringBuilder();
@@ -394,6 +330,7 @@ internal static class ConsoleDialog
         int h  = 9;
         int x  = (Console.WindowWidth  - w) / 2;
         int y  = Math.Max(0, (Console.WindowHeight - h) / 2);
+        string? result = null;
 
         while (true)
         {
@@ -432,13 +369,15 @@ internal static class ConsoleDialog
             Console.Write(R.Fit("[F5] Подтвердить   [Del] Очистить   [Esc] Отмена", w - 4));
 
             var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Escape)                     return null;
-            if (k.Key == ConsoleKey.F5)                         return sb.Length > 0 ? sb.ToString() : null;
-            if (k.Key == ConsoleKey.Delete)                     { sb.Clear(); continue; }
-            if (k.Key == ConsoleKey.Enter)                      { sb.Append('\n'); continue; }
+            if (k.Key == ConsoleKey.Escape) break;
+            if (k.Key == ConsoleKey.F5)     { result = sb.Length > 0 ? sb.ToString() : null; break; }
+            if (k.Key == ConsoleKey.Delete) { sb.Clear(); continue; }
+            if (k.Key == ConsoleKey.Enter)  { sb.Append('\n'); continue; }
             if (k.Key == ConsoleKey.Backspace && sb.Length > 0) { sb.Remove(sb.Length - 1, 1); continue; }
-            if (!char.IsControl(k.KeyChar))                     sb.Append(k.KeyChar);
+            if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
         }
+        R.Invalidate();
+        return result;
     }
 
     // ── Перенос длинных строк ────────────────────────────────────────────────
@@ -483,4 +422,63 @@ internal static class ConsoleDialog
 
     private static void Row(int x, int y, int w)
     { Pos(x, y); Console.Write("║" + new string(' ', w - 2) + "║"); }
+
+    private static void Draw(string title, string[] lines, string buttons)
+    {
+        int w   = Math.Min(Console.WindowWidth - 4, 72);
+        int h   = lines.Length + 5;
+        h       = Math.Min(h, Console.WindowHeight - 2);
+        int x   = (Console.WindowWidth  - w) / 2;
+        int y   = (Console.WindowHeight - h) / 2;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, title);
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        for (int i = 0; i < lines.Length && y + 2 + i < y + h - 2; i++)
+        {
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + 2 + i);
+            Console.Write(R.Fit(lines[i], w - 4));
+        }
+
+        if (!string.IsNullOrEmpty(buttons))
+        {
+            CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+            int bx = x + (w - buttons.Length) / 2;
+            Pos(bx, y + h - 2);
+            Console.Write(buttons);
+        }
+    }
+
+    private static void DrawScroll(string title, string[] lines, int scroll,
+        bool hasSave = false, string? overrideHint = null)
+    {
+        int w      = Math.Min(Console.WindowWidth - 4, 78);
+        int innerH = Console.WindowHeight - 6;
+        int h      = innerH + 4;
+        int x      = (Console.WindowWidth  - w) / 2;
+        int y      = 1;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, title);
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        for (int i = 0; i < innerH; i++)
+        {
+            int li = scroll + i;
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + 2 + i);
+            Console.Write(R.Fit(li < lines.Length ? lines[li] : "", w - 4));
+        }
+
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        Pos(x + 2, y + h - 2);
+        var hint = overrideHint ?? (hasSave
+            ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
+            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть");
+        Console.Write(R.Fit(hint, w - 4));
+    }
 }
