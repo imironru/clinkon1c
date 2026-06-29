@@ -2969,31 +2969,29 @@ public class FarApp
     private void DrawHome(NavLevel lvl)
     {
         DrawHeader();
-        R.SplitTop(1, lvl.Title, "Сводка системы");
+        R.SplitTop(1, "Меню  ·  " + lvl.Title, "Сводка");
         R.SplitRow(2, "", R.PanelFg, R.PanelBg, "", R.PanelFg, R.PanelBg);
         R.SplitSep(3);
 
         var diagLines = BuildDiagLines();
+        const int badgeW = 10; // [xxxxxxxx] — 10 символов
+
         for (int row = ItemTop; row <= ItemBot; row++)
         {
             int idx = lvl.ScrollTop + (row - ItemTop);
 
-            // ── левая панель: пункт меню ───────────────────────────────────
+            // ── левая панель: пункт меню ──────────────────────────────────
             string leftContent = "";
             ConsoleColor lfg = R.PanelFg, lbg = R.PanelBg;
             if (idx < lvl.Items.Count)
             {
-                var item     = lvl.Items[idx];
+                var item      = lvl.Items[idx];
                 bool isCursor = idx == lvl.Cursor;
-                string arrow = item.CanEnter ? "►" : " ";
-                string size  = item.SizeBytes > 0
-                    ? SafeDelete.FormatSize(item.SizeBytes).PadLeft(10)
-                    : (item.Description != null ? item.Description.PadLeft(10) : "          ");
-                leftContent  = $" {arrow} {item.Name}";
-                // показываем размер если есть место
-                int nameAvail = R.LeftInnerW - 4;
-                string nameStr = R.Fit(item.Name, nameAvail - 11);
-                leftContent = $" {arrow} {nameStr}{size}";
+                string arrow  = item.CanEnter ? "►" : " ";
+                string badge  = HomeBadge(item);             // 10 chars: [xxxxxxxx]
+                int nameAvail = R.LeftInnerW - 3 - badgeW;  // " ► " + badge
+                string name   = R.Fit(item.Name, nameAvail);
+                leftContent   = $" {arrow} {name}{badge}";
                 lfg = isCursor ? R.CurFg : R.PanelFg;
                 lbg = isCursor ? R.CurBg : R.PanelBg;
             }
@@ -3013,13 +3011,57 @@ public class FarApp
 
         R.SplitSep(SepBot);
         R.SplitRow(InfoRow,
-            "  [Enter] Открыть  [F5] Обновить сводку  [F10] Выход",
+            "  [Enter] Открыть",
             R.HdrFg, R.HdrBg,
-            "", R.HdrFg, R.HdrBg);
+            "  [F5] Обновить сводку",
+            R.HdrFg, R.HdrBg);
         R.SplitBottom(BotBorder);
         DrawMsg();
         DrawKeyBar();
         R.Flush();
+    }
+
+    private string HomeBadge(NavItem item)
+    {
+        string inner;
+        switch (item.ModuleId)
+        {
+            case "cache":
+            case "templates":
+                inner = item.SizeBytes > 0 ? SafeDelete.FormatSize(item.SizeBytes) : "0 Б";
+                break;
+            case "bases":
+                inner = _bases.Entries.Count.ToString();
+                break;
+            case "licenses":
+                inner = _licenses.Entries.Count > 0 ? "✓" : " ";
+                break;
+            case "agents":
+                int runAgents = _agents.Entries.Count(a => a.Status == "Running");
+                inner = runAgents > 0 ? $"▶ {runAgents}"
+                      : (_agents.Entries.Count > 0 ? "■" : " ");
+                break;
+            case "processes":
+                inner = _processes.Entries.Count > 0
+                    ? _processes.Entries.Count.ToString() : " ";
+                break;
+            case "web":
+                inner = _web.Entries.Count > 0 ? "✓" : " ";
+                break;
+            case "emulators":
+                int eFound = _emulators.Found.Count;
+                inner = eFound > 0 ? $"! {eFound}" : "✓";
+                break;
+            case "configs":
+                int cfFound = _configs.Files.Count(f => f.Found);
+                int cfTotal = _configs.Files.Count;
+                inner = $"{cfFound}/{cfTotal}";
+                break;
+            default:
+                inner = " ";
+                break;
+        }
+        return ("[" + inner + "]").PadLeft(10);
     }
 
     private List<(string Text, ConsoleColor Fg)> BuildDiagLines()
@@ -3042,7 +3084,7 @@ public class FarApp
         lines.Add((" Версии 1С платформы", ConsoleColor.Cyan));
         if (d.Versions.Count == 0)
         {
-            lines.Add(("  — не обнаружено", ConsoleColor.DarkGray));
+            lines.Add(("  [ ]  не обнаружено", ConsoleColor.DarkGray));
         }
         else
         {
@@ -3055,7 +3097,7 @@ public class FarApp
                 if (v.HasCom)    tags.Append($"[COM {v.ComVer}]");
                 if (v.HasWeb)    tags.Append("[Веб]");
                 if (v.HasIbcmd)  tags.Append("[ibcmd]");
-                lines.Add(($"  {v.Version}  {tags}", ConsoleColor.White));
+                lines.Add(($"  [✓]  {v.Version}  {tags}", ConsoleColor.White));
             }
         }
         lines.Add(("", R.PanelFg));
@@ -3066,14 +3108,15 @@ public class FarApp
         {
             if (!ws.IsInstalled)
             {
-                lines.Add(($"  —  {ws.Name,-16} не установлен", ConsoleColor.DarkGray));
+                lines.Add(($"  [ ]  {ws.Name,-14} не установлен", ConsoleColor.DarkGray));
             }
             else
             {
                 string ver = ws.Version != null ? $" {ws.Version}" : "";
                 string st  = ws.IsRunning ? "работает" : "остановлен";
+                string ind = ws.IsRunning ? "[✓]" : "[■]";
                 ConsoleColor c = ws.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
-                lines.Add(($"  ✓  {ws.Name + ver,-16} {st}", c));
+                lines.Add(($"  {ind}  {ws.Name + ver,-14} {st}", c));
             }
         }
         lines.Add(("", R.PanelFg));
@@ -3084,15 +3127,16 @@ public class FarApp
         {
             if (!db.IsInstalled)
             {
-                lines.Add(($"  —  {db.Name,-22} не установлен", ConsoleColor.DarkGray));
+                lines.Add(($"  [ ]  {db.Name,-20} не установлен", ConsoleColor.DarkGray));
             }
             else
             {
                 string ver   = db.Version != null ? $" {db.Version}" : "";
                 string st    = db.IsRunning ? "работает" : "остановлен";
-                string admin = db.HasAdminTool ? "  SSMS/pgAdmin: ✓" : "";
+                string admin = db.HasAdminTool ? "  [SSMS]" : "";
+                string ind   = db.IsRunning ? "[✓]" : "[■]";
                 ConsoleColor c = db.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
-                lines.Add(($"  ✓  {db.Name + ver,-22} {st}{admin}", c));
+                lines.Add(($"  {ind}  {db.Name + ver,-20} {st}{admin}", c));
             }
         }
         lines.Add(("", R.PanelFg));
@@ -3101,7 +3145,7 @@ public class FarApp
         lines.Add((" Сервисы 1С", ConsoleColor.Cyan));
         if (d.Services.Count == 0)
         {
-            lines.Add(("  — сервисы не обнаружены", ConsoleColor.DarkGray));
+            lines.Add(("  [ ]  сервисы не обнаружены", ConsoleColor.DarkGray));
         }
         else
         {
@@ -3109,13 +3153,12 @@ public class FarApp
             {
                 string st   = svc.IsRunning ? "работает" : "остановлен";
                 string port = svc.Port != null ? $"  :{svc.Port}" : "";
+                string ind  = svc.IsRunning ? "[✓]" : "[■]";
                 ConsoleColor c = svc.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
-                string prefix  = svc.IsRunning ? "✓" : "✗";
-                // убираем длинный префикс "1C:Enterprise 8.3 Server" → оставляем версию и тип
-                string name = svc.DisplayName.Length > 30
-                    ? svc.DisplayName.Substring(0, 29) + "…"
+                string name = svc.DisplayName.Length > 28
+                    ? svc.DisplayName.Substring(0, 27) + "…"
                     : svc.DisplayName;
-                lines.Add(($"  {prefix}  {name,-30} {st}{port}", c));
+                lines.Add(($"  {ind}  {name,-28} {st}{port}", c));
             }
         }
         lines.Add(("", R.PanelFg));
@@ -3126,7 +3169,7 @@ public class FarApp
             lines.Add((" Порты", ConsoleColor.Cyan));
             var portLine = new System.Text.StringBuilder("  ");
             foreach (var (port, label, open) in d.Ports)
-                portLine.Append($"{port}{(open ? "✓" : "✗")}  ");
+                portLine.Append($"[{(open ? "✓" : " ")}] {port}  ");
             lines.Add((portLine.ToString().TrimEnd(), ConsoleColor.White));
         }
 
