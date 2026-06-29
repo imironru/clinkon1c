@@ -82,7 +82,8 @@ public class FarApp
     private readonly EmulatorModule     _emulators;
     private readonly ConfigsModule      _configs;
     private readonly DiagnosticsModule  _diagnostics;
-    private readonly string?         _updateNotice;
+    private volatile string?          _updateNotice;
+    private readonly Func<string?>?   _updateChecker;
 
     // Отмеченные базы (по Connect= строке как ключу)
     private readonly HashSet<string> _markedBases =
@@ -114,19 +115,21 @@ public class FarApp
                   LicensesModule licenses, RagentModule agents, ProcessesModule processes,
                   WebModule web, EmulatorModule emulators, ConfigsModule configs,
                   DiagnosticsModule diagnostics,
-                  string? updateNotice = null)
+                  string? updateNotice = null,
+                  Func<string?>? updateChecker = null)
     {
-        _cache        = cache;
-        _templates    = templates;
-        _bases        = bases;
-        _licenses     = licenses;
-        _agents       = agents;
-        _processes    = processes;
-        _web          = web;
-        _emulators    = emulators;
-        _configs      = configs;
-        _diagnostics  = diagnostics;
-        _updateNotice = updateNotice;
+        _cache          = cache;
+        _templates      = templates;
+        _bases          = bases;
+        _licenses       = licenses;
+        _agents         = agents;
+        _processes      = processes;
+        _web            = web;
+        _emulators      = emulators;
+        _configs        = configs;
+        _diagnostics    = diagnostics;
+        _updateNotice   = updateNotice;
+        _updateChecker  = updateChecker;
         Logger.MessageLogged += OnLog;
     }
 
@@ -140,6 +143,7 @@ public class FarApp
         {
             R.Init();
             Rescan();
+            StartUpdateWatcher();
 
             while (_running)
             {
@@ -185,6 +189,33 @@ public class FarApp
     }
 
     // ── Сканирование ─────────────────────────────────────────────────────────
+    private void StartUpdateWatcher()
+    {
+        if (_updateChecker == null || _updateNotice != null) return;
+
+        var t = new Thread(() =>
+        {
+            int[] delays = { 5, 10, 30 }; // минуты: +5, потом ещё +10, потом ещё +30 = итого +5/+15/+45
+            foreach (var min in delays)
+            {
+                Thread.Sleep(TimeSpan.FromMinutes(min));
+                if (!_running) return;
+                try
+                {
+                    var notice = _updateChecker();
+                    if (notice != null)
+                    {
+                        _updateNotice = notice;
+                        R.Invalidate();
+                    }
+                }
+                catch { }
+            }
+        });
+        t.IsBackground = true;
+        t.Start();
+    }
+
     private void Rescan()
     {
         _nav.Clear();
@@ -3097,13 +3128,15 @@ public class FarApp
         }
         else
         {
-            // заголовок таблицы
-            lines.Add(("  Версия          Серв  Толст  Тонк   COM    Веб  ibcmd", ConsoleColor.Gray));
+            const int VW = 13, CW = 6;
+            string Col(string txt) => txt.PadRight(CW);
+            string Chk(bool f)     => Col(f ? "[✓]" : "[ ]");
+
+            lines.Add(($"  {"Версия",-VW} {Col("Серв")}{Col("Толст")}{Col("Тонк")}{Col("COM")}{Col("Веб")}{Col("ibcmd")}", ConsoleColor.Gray));
             foreach (var v in d.Versions)
             {
-                string s(bool f) => f ? "[✓]" : "[ ]";
-                string com = v.HasCom && v.ComVer != null ? $"[{v.ComVer}]" : "[ ]  ";
-                string row = $"  {v.Version,-14}  {s(v.HasServer)}   {s(v.HasThick)}   {s(v.HasThin)}  {com,-6} {s(v.HasWeb)}  {s(v.HasIbcmd)}";
+                string com = Col(v.HasCom && v.ComVer != null ? $"[{v.ComVer}]" : "[ ]");
+                string row = $"  {v.Version,-VW} {Chk(v.HasServer)}{Chk(v.HasThick)}{Chk(v.HasThin)}{com}{Chk(v.HasWeb)}{Chk(v.HasIbcmd)}";
                 lines.Add((row, ConsoleColor.White));
             }
         }

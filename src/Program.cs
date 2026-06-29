@@ -143,7 +143,12 @@ class Program
             var emulators    = new EmulatorModule();
             var configs      = new ConfigsModule();
             var diagnostics  = new DiagnosticsModule();
-            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, diagnostics, updateNotice).Run();
+            static string? CheckSilent()
+            {
+                try { var u = CheckForUpdate(); return u != null ? $"v{u.Version}" : null; }
+                catch { return null; }
+            }
+            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, diagnostics, updateNotice, CheckSilent).Run();
         }
         finally
         {
@@ -468,12 +473,18 @@ class Program
 
             // Bat-скрипт: ждёт выхода текущего процесса, кладёт новый exe рядом под правильным именем
             var scriptPath = Path.Combine(Path.GetTempPath(), "clinkon1c_upd.bat");
+            // Удаляем старый exe только если он отличается от нового (разные имена версий)
+            string deleteOld = !string.Equals(currentExe, newExePath, StringComparison.OrdinalIgnoreCase)
+                ? $"del /F /Q \"{currentExe}\" >nul 2>&1\r\n"
+                : "";
+
             File.WriteAllText(scriptPath,
                 $"@echo off\r\n" +
                 $"timeout /t 2 /nobreak >nul\r\n" +
                 $"copy /y \"{tempFile}\" \"{newExePath}\" >nul\r\n" +
                 $"del \"{tempFile}\" >nul\r\n" +
                 $"start \"\" \"{newExePath}\" --skip-admin-warning\r\n" +
+                deleteOld +
                 $"del \"%~f0\"\r\n",
                 System.Text.Encoding.ASCII);
 
