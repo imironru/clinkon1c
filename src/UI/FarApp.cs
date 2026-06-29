@@ -140,7 +140,6 @@ public class FarApp
         {
             R.Init();
             Rescan();
-            _diagnostics.ScanAsync();
 
             while (_running)
             {
@@ -191,36 +190,35 @@ public class FarApp
         _nav.Clear();
         _sel.Clear();
 
-        string status = "Инициализация...";
-        bool   done   = false;
-        int    spin   = 0;
-        var    spinCh = new[] { '|', '/', '-', '\\' };
-
-        var t = new Thread(() =>
+        // Шаги: (метка прогресс-бара, действие)
+        var steps = new (string Label, Action Run)[]
         {
-            try
-            {
-                _cache.Refresh(msg     => { status = msg; });
-                _templates.Refresh(msg => { status = "Шаблоны: " + msg; });
-                status = "Загрузка списка баз...";
-                _bases.Refresh();
-            }
-            catch (Exception ex) { Logger.Error($"Сканирование: {ex.Message}"); }
-            finally { done = true; }
-        });
-        t.IsBackground = true;
-        t.Start();
+            ("Кэш...",          () => _cache.Refresh()),
+            ("Шаблоны...",      () => _templates.Refresh()),
+            ("Базы...",         () => _bases.Refresh()),
+            ("Лицензии...",     () => _licenses.Refresh()),
+            ("Агенты...",       () => _agents.Refresh()),
+            ("Процессы...",     () => _processes.Refresh()),
+            ("Веб...",          () => _web.Refresh()),
+            ("Эмуляторы...",    () => _emulators.Scan()),
+            ("Конфиги...",      () => _configs.Refresh()),
+            ("Диагностика...",  () => _diagnostics.ScanSync()),
+        };
 
-        while (!done)
+        int total = steps.Length;
+        for (int i = 0; i < total; i++)
         {
-            DrawScanDlg(status, spinCh[spin++ % spinCh.Length]);
-            Thread.Sleep(100);
+            DrawScanProgress(steps[i].Label, i, total);
+            try { steps[i].Run(); }
+            catch (Exception ex) { Logger.Error($"Сканирование [{steps[i].Label}]: {ex.Message}"); }
         }
-        t.Join();
+        DrawScanProgress("Готово", total, total);
+        Thread.Sleep(120); // кратко показываем 100%
 
         R.Invalidate();
         _nav.Push(MakeHomeLevel());
     }
+
 
     /// <summary>
     /// Пересканирует только кэш и восстанавливает навигацию на прежнем уровне.
@@ -295,6 +293,29 @@ public class FarApp
         At(dx, dy + 2); Console.Write("║" + R.Fit($"  {sp}  {status}", dw - 2) + "║");
         At(dx, dy + 3); Console.Write("║" + new string(' ', dw - 2) + "║");
         At(dx, dy + 4); Console.Write("╚" + new string('═', dw - 2) + "╝");
+    }
+
+    private static void DrawScanProgress(string label, int step, int total)
+    {
+        int dw   = Math.Min(60, R.W - 4);
+        int dx   = (R.W - dw) / 2;
+        int dy   = (R.H - 7) / 2;
+        int barW = dw - 4;  // ширина полосы внутри рамки
+        int fill = total > 0 ? step * barW / total : barW;
+        string bar  = new string('█', fill) + new string('░', barW - fill);
+        int    pct  = total > 0 ? step * 100 / total : 100;
+        string pctStr = $"{pct,3}%";
+
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        void At(int x, int y) { try { Console.SetCursorPosition(x, y); } catch { } }
+        At(dx, dy);     Console.Write("╔" + new string('═', dw - 2) + "╗");
+        At(dx, dy + 1); Console.Write("║" + R.Fit("  Clinkon1C — Инициализация", dw - 2) + "║");
+        At(dx, dy + 2); Console.Write("╠" + new string('═', dw - 2) + "╣");
+        At(dx, dy + 3); Console.Write("║" + R.Fit($"  {label}", dw - 2) + "║");
+        At(dx, dy + 4); Console.Write("║" + " " + bar + " " + "║");
+        At(dx, dy + 5); Console.Write("║" + R.Fit($"  {pctStr}  {step}/{total} модулей", dw - 2) + "║");
+        At(dx, dy + 6); Console.Write("╚" + new string('═', dw - 2) + "╝");
     }
 
     // ── Построение уровней ───────────────────────────────────────────────────
@@ -3143,22 +3164,22 @@ public class FarApp
 
         // ── Сервисы 1С ───────────────────────────────────────────────────
         lines.Add((" Сервисы 1С", ConsoleColor.Cyan));
-        if (d.Services.Count == 0)
+        if (_agents.Entries.Count == 0)
         {
             lines.Add(("  [ ]  сервисы не обнаружены", ConsoleColor.DarkGray));
         }
         else
         {
-            foreach (var svc in d.Services)
+            foreach (var svc in _agents.Entries)
             {
-                string st   = svc.IsRunning ? "работает" : "остановлен";
-                string port = svc.Port != null ? $"  :{svc.Port}" : "";
-                string ind  = svc.IsRunning ? "[✓]" : "[■]";
-                ConsoleColor c = svc.IsRunning ? ConsoleColor.Green : ConsoleColor.Yellow;
+                bool running = svc.Status == "Running";
+                string st  = StatusDisplay(svc.Status);
+                string ind = running ? "[✓]" : "[■]";
+                ConsoleColor c = running ? ConsoleColor.Green : ConsoleColor.Yellow;
                 string name = svc.DisplayName.Length > 28
                     ? svc.DisplayName.Substring(0, 27) + "…"
                     : svc.DisplayName;
-                lines.Add(($"  {ind}  {name,-28} {st}{port}", c));
+                lines.Add(($"  {ind}  {name,-28} {st}", c));
             }
         }
         lines.Add(("", R.PanelFg));
