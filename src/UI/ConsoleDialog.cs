@@ -9,13 +9,14 @@ internal static class ConsoleDialog
     // ── Confirm Y/N ──────────────────────────────────────────────────────────
     public static bool Confirm(string title, string message)
     {
-        Draw(title, message.Split('\n'), "[Y] Да    [N] Нет");
+        Draw(title, message.Split('\n'), "[Y/Д] Да    [N/Н/Esc] Нет");
         while (true)
         {
             var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Y || k.KeyChar == 'y' || k.KeyChar == 'Y') return true;
-            if (k.Key == ConsoleKey.N || k.KeyChar == 'n' || k.KeyChar == 'N') return false;
-            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)          return false;
+            char c = k.KeyChar;
+            if (k.Key == ConsoleKey.Y || c == 'y' || c == 'Y' || c == 'д' || c == 'Д') return true;
+            if (k.Key == ConsoleKey.N || c == 'n' || c == 'N' || c == 'н' || c == 'Н') return false;
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)                   return false;
         }
     }
 
