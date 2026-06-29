@@ -315,7 +315,7 @@ class Program
 
     // ── Обновление ────────────────────────────────────────────────────────────
 
-    private record UpdateInfo(string Version, string DownloadUrl);
+    private record UpdateInfo(string Version, string DownloadUrl, string AssetName);
 
     private static UpdateInfo? CheckForUpdate()
     {
@@ -339,7 +339,7 @@ class Program
         var asset = release.Assets?.FirstOrDefault(a =>
             a.Name?.Contains(keyword) == true && a.Name.EndsWith(".exe"));
 
-        return new UpdateInfo(latest, asset?.BrowserDownloadUrl ?? "");
+        return new UpdateInfo(latest, asset?.BrowserDownloadUrl ?? "", asset?.Name ?? "");
     }
 
     private static bool IsNewerVersion(string current, string latest)
@@ -423,6 +423,10 @@ class Program
             }
 
             var currentExe = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName;
+            var currentDir = Path.GetDirectoryName(currentExe)!;
+            // Имя нового файла берём из релиза (содержит версию), не из имени текущего процесса
+            var assetName  = !string.IsNullOrEmpty(upd.AssetName) ? upd.AssetName : Path.GetFileName(currentExe);
+            var newExePath = Path.Combine(currentDir, assetName);
             var tempFile   = Path.Combine(Path.GetTempPath(), "Clinkon1C_update.exe");
 
             using var client = new HttpClient();
@@ -434,14 +438,14 @@ class Program
             Console.SetCursorPosition(2, 3);
             Console.Write("Применение обновления...");
 
-            // Bat-скрипт: ждёт выхода текущего процесса, копирует новый файл, запускает
+            // Bat-скрипт: ждёт выхода текущего процесса, кладёт новый exe рядом под правильным именем
             var scriptPath = Path.Combine(Path.GetTempPath(), "clinkon1c_upd.bat");
             File.WriteAllText(scriptPath,
                 $"@echo off\r\n" +
                 $"timeout /t 2 /nobreak >nul\r\n" +
-                $"copy /y \"{tempFile}\" \"{currentExe}\" >nul\r\n" +
+                $"copy /y \"{tempFile}\" \"{newExePath}\" >nul\r\n" +
                 $"del \"{tempFile}\" >nul\r\n" +
-                $"start \"\" \"{currentExe}\" --skip-admin-warning\r\n" +
+                $"start \"\" \"{newExePath}\" --skip-admin-warning\r\n" +
                 $"del \"%~f0\"\r\n",
                 System.Text.Encoding.ASCII);
 

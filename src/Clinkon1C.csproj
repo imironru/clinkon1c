@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>1.2.37</Version>
+    <Version>1.2.38</Version>
     <Company>Clinkon1C</Company>
     <Description>Утилита администратора для очистки артефактов 1С</Description>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
