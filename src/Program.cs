@@ -106,8 +106,9 @@ class Program
             if (!ShowElevationMenu()) return;
         }
 
-        // 2. После прав — предупреждение в FAR-стиле (пользователь жмёт только один раз)
-        if (!ShowWarningDialog()) return;
+        // 2. После прав — предупреждение в FAR-стиле (пропускается при авто-обновлении)
+        bool skipWarning = Array.IndexOf(args, "--skip-admin-warning") >= 0;
+        if (!skipWarning && !ShowWarningDialog()) return;
 
         // 3. Проверка обновлений — интерактивная, предлагаем обновиться
         string? updateNotice = null;
@@ -440,7 +441,7 @@ class Program
                 $"timeout /t 2 /nobreak >nul\r\n" +
                 $"copy /y \"{tempFile}\" \"{currentExe}\" >nul\r\n" +
                 $"del \"{tempFile}\" >nul\r\n" +
-                $"start \"\" \"{currentExe}\"\r\n" +
+                $"start \"\" \"{currentExe}\" --skip-admin-warning\r\n" +
                 $"del \"%~f0\"\r\n",
                 System.Text.Encoding.ASCII);
 
