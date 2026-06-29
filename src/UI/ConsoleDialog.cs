@@ -50,13 +50,11 @@ internal static class ConsoleDialog
             Pos(btnX + BYes.Length + Gap, btnY); Console.Write(BNo);
 
             var k = Console.ReadKey(true);
-            char c = k.KeyChar;
 
-            // Быстрые клавиши
-            if (k.Key == ConsoleKey.Y || c == 'y' || c == 'Y' || c == 'д' || c == 'Д')
+            // ConsoleKey — физическая позиция кнопки, не зависит от раскладки
+            if (k.Key == ConsoleKey.Y)
                 { R.Invalidate(); return true; }
-            if (k.Key == ConsoleKey.N || c == 'n' || c == 'N' || c == 'н' || c == 'Н'
-                || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
+            if (k.Key == ConsoleKey.N || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
                 { R.Invalidate(); return false; }
 
             // Навигация
@@ -112,7 +110,7 @@ internal static class ConsoleDialog
             if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 1);
             if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - 10);
             if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 10);
-            if (onSave != null && (k.Key == ConsoleKey.S || k.KeyChar == 's' || k.KeyChar == 'S'))
+            if (onSave != null && k.Key == ConsoleKey.S)
                 onSave();
         }
         R.Invalidate();
@@ -202,7 +200,7 @@ internal static class ConsoleDialog
             }
             else if (k.Key == ConsoleKey.Spacebar)
                 marked[cursor] = !marked[cursor];
-            else if (k.Key == ConsoleKey.A || k.KeyChar == 'a' || k.KeyChar == 'A')
+            else if (k.Key == ConsoleKey.A)
             {
                 bool allOn = marked.All(m => m);
                 for (int i = 0; i < marked.Length; i++) marked[i] = !allOn;
