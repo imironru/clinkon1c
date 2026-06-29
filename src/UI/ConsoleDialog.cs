@@ -4,24 +4,70 @@ namespace Clinkon1C.UI;
 // вызывающий код не должен заботиться о восстановлении экрана.
 internal static class ConsoleDialog
 {
-    // ── Confirm Y/N ──────────────────────────────────────────────────────────
-    public static bool Confirm(string title, string message)
+    // ── Confirm Y/N с навигацией кнопок ─────────────────────────────────────
+    // defaultYes=false → курсор на «Нет» (безопаснее для деструктивных операций)
+    public static bool Confirm(string title, string message, bool defaultYes = false)
     {
-        Draw(title, message.Split('\n'), "[Y/Д] Да    [N/Н/Esc] Нет");
-        bool result = false;
+        var msgLines = message.Split('\n');
+        int w  = Math.Min(Console.WindowWidth - 4, 72);
+        int h  = Math.Min(msgLines.Length + 5, Console.WindowHeight - 2);
+        int x  = (Console.WindowWidth  - w) / 2;
+        int y  = (Console.WindowHeight - h) / 2;
+        int sel = defaultYes ? 0 : 1; // 0 = Да, 1 = Нет
+
         while (true)
         {
+            // Рамка
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, title);
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            // Текст сообщения
+            for (int i = 0; i < msgLines.Length && y + 2 + i < y + h - 3; i++)
+            {
+                CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+                Pos(x + 2, y + 2 + i);
+                Console.Write(R.Fit(msgLines[i], w - 4));
+            }
+
+            // Кнопки
+            const string BYes = "  Да  ";
+            const string BNo  = "  Нет  ";
+            const int Gap = 4;
+            int btnX = x + (w - BYes.Length - Gap - BNo.Length) / 2;
+            int btnY = y + h - 2;
+
+            CC(sel == 0 ? ConsoleColor.Black : ConsoleColor.Yellow,
+               sel == 0 ? ConsoleColor.Cyan  : ConsoleColor.DarkBlue);
+            Pos(btnX, btnY); Console.Write(BYes);
+
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Pos(btnX + BYes.Length, btnY); Console.Write(new string(' ', Gap));
+
+            CC(sel == 1 ? ConsoleColor.Black : ConsoleColor.Yellow,
+               sel == 1 ? ConsoleColor.Cyan  : ConsoleColor.DarkBlue);
+            Pos(btnX + BYes.Length + Gap, btnY); Console.Write(BNo);
+
             var k = Console.ReadKey(true);
             char c = k.KeyChar;
+
+            // Быстрые клавиши
             if (k.Key == ConsoleKey.Y || c == 'y' || c == 'Y' || c == 'д' || c == 'Д')
-                { result = true; break; }
-            if (k.Key == ConsoleKey.N || c == 'n' || c == 'N' || c == 'н' || c == 'Н')
-                break;
-            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
-                break;
+                { R.Invalidate(); return true; }
+            if (k.Key == ConsoleKey.N || c == 'n' || c == 'N' || c == 'н' || c == 'Н'
+                || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
+                { R.Invalidate(); return false; }
+
+            // Навигация
+            if (k.Key == ConsoleKey.LeftArrow  || k.Key == ConsoleKey.RightArrow
+                || k.Key == ConsoleKey.Tab)
+                sel = 1 - sel;
+
+            // Подтверждение
+            if (k.Key == ConsoleKey.Enter)
+                { R.Invalidate(); return sel == 0; }
         }
-        R.Invalidate();
-        return result;
     }
 
     // ── Confirm + ввод слова ─────────────────────────────────────────────────
