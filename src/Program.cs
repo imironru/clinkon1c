@@ -6,6 +6,7 @@ using Clinkon1C.Core;
 using Clinkon1C.Modules.Agents;
 using Clinkon1C.Modules.Bases;
 using Clinkon1C.Modules.Cache;
+using Clinkon1C.Modules.COM;
 using Clinkon1C.Modules.Configs;
 using Clinkon1C.Modules.Diagnostics;
 using Clinkon1C.Modules.Emulators;
@@ -143,12 +144,13 @@ class Program
             var emulators    = new EmulatorModule();
             var configs      = new ConfigsModule();
             var diagnostics  = new DiagnosticsModule();
+            var com          = new ComModule();
             static string? CheckSilent()
             {
                 try { var u = CheckForUpdate(); return u != null ? $"v{u.Version}" : null; }
                 catch { return null; }
             }
-            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, diagnostics, updateNotice, CheckSilent).Run();
+            new FarApp(cache, templates, bases, licenses, agents, processes, web, emulators, configs, diagnostics, com, updateNotice, CheckSilent).Run();
         }
         finally
         {

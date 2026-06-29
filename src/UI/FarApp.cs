@@ -9,6 +9,7 @@ using Clinkon1C.Modules.Emulators;
 using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
+using Clinkon1C.Modules.COM;
 using Clinkon1C.Modules.Web;
 
 namespace Clinkon1C.UI;
@@ -31,7 +32,8 @@ internal enum NavLevelKind
     ProcessesRoot,   // список запущенных процессов 1С
     WebRoot,         // список веб-публикаций 1С (Apache)
     EmulatorsRoot,   // аудит эмуляторов HASP
-    ConfigsRoot      // конфигурационные файлы платформы
+    ConfigsRoot,     // конфигурационные файлы платформы
+    ComRoot          // COM-коннектор 1С
 }
 
 internal class NavItem
@@ -82,6 +84,7 @@ public class FarApp
     private readonly EmulatorModule     _emulators;
     private readonly ConfigsModule      _configs;
     private readonly DiagnosticsModule  _diagnostics;
+    private readonly ComModule          _com;
     private volatile string?          _updateNotice;
     private readonly Func<string?>?   _updateChecker;
 
@@ -114,7 +117,7 @@ public class FarApp
     public FarApp(CacheModule cache, TemplatesModule templates, BasesModule bases,
                   LicensesModule licenses, RagentModule agents, ProcessesModule processes,
                   WebModule web, EmulatorModule emulators, ConfigsModule configs,
-                  DiagnosticsModule diagnostics,
+                  DiagnosticsModule diagnostics, ComModule com,
                   string? updateNotice = null,
                   Func<string?>? updateChecker = null)
     {
@@ -128,6 +131,7 @@ public class FarApp
         _emulators      = emulators;
         _configs        = configs;
         _diagnostics    = diagnostics;
+        _com            = com;
         _updateNotice   = updateNotice;
         _updateChecker  = updateChecker;
         Logger.MessageLogged += OnLog;
@@ -234,6 +238,7 @@ public class FarApp
             ("Эмуляторы...",    () => _emulators.Scan()),
             ("Конфиги...",      () => _configs.Refresh()),
             ("Диагностика...",  () => _diagnostics.ScanSync()),
+            ("COM...",          () => _com.Scan()),
         };
 
         int total = steps.Length;
@@ -445,6 +450,15 @@ public class FarApp
                     ModuleId    = "configs",
                     Paths       = new List<string>(),
                     Description = "conf.cfg, logcfg.xml ..."
+                },
+                new NavItem
+                {
+                    Name        = "COM Коннектор",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "com",
+                    Paths       = new List<string>(),
+                    Description = "comcntr.dll / COM+"
                 }
             }
         };
@@ -1108,6 +1122,8 @@ public class FarApp
                     EnterEmulators();
                 else if (item.ModuleId == "configs")
                     EnterConfigs();
+                else if (item.ModuleId == "com")
+                    EnterCom();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -1183,6 +1199,10 @@ public class FarApp
             case NavLevelKind.ConfigsRoot:
                 DoEditConfig(item.BaseName);
                 break;
+
+            case NavLevelKind.ComRoot:
+                DoComAction(item);
+                break;
         }
     }
 
@@ -1216,6 +1236,7 @@ public class FarApp
             case NavLevelKind.WebRoot:       rebuilt = MakeWebLevel();       break;
             case NavLevelKind.EmulatorsRoot: rebuilt = MakeEmulatorsLevel(); break;
             case NavLevelKind.ConfigsRoot:   rebuilt = MakeConfigsLevel();   break;
+            case NavLevelKind.ComRoot:       rebuilt = MakeComLevel();       break;
             case NavLevelKind.TemplatesRoot: rebuilt = MakeTemplatesLevel(); break;
             case NavLevelKind.TemplatesUser:
                 if (cur.ContextUser != null) rebuilt = MakeTemplatesUserLevel(cur.ContextUser);
@@ -2017,6 +2038,119 @@ public class FarApp
         ConsoleDialog.ShowProgress("Поиск конфигурационных файлов...", _ => _configs.Refresh());
         R.Invalidate();
         _nav.Push(MakeConfigsLevel());
+    }
+
+    private void EnterCom()
+    {
+        ConsoleDialog.ShowProgress("Сканирование COM-коннекторов...", _ => _com.Scan());
+        R.Invalidate();
+        _nav.Push(MakeComLevel());
+    }
+
+    private NavLevel MakeComLevel()
+    {
+        var items = new List<NavItem> { UpItem() };
+
+        var reg = _com.Registered;
+        if (reg.Count > 0)
+        {
+            items.Add(new NavItem { Name = "── Зарегистрированные ──────────────────────────────────", CanEnter = false, ShowDescCol = false });
+            foreach (var e in reg)
+            {
+                string src  = e.Source == "COM+" ? "COM+" : "regsvr32";
+                string warn = e.DllExists ? "" : " [!dll отсутствует]";
+                items.Add(new NavItem
+                {
+                    Name        = e.ProgId,
+                    Description = $"{src}{warn}",
+                    ShowDescCol = true,
+                    CanEnter    = true,
+                    IsDead      = !e.DllExists,
+                    BaseName    = e.ProgId
+                });
+            }
+        }
+
+        var avail = _com.Available;
+        if (avail.Count > 0)
+        {
+            items.Add(new NavItem { Name = "── Доступные для регистрации ───────────────────────────", CanEnter = false, ShowDescCol = false });
+            foreach (var e in avail)
+            {
+                items.Add(new NavItem
+                {
+                    Name        = e.DllPath,
+                    Description = "не зарегистрован",
+                    ShowDescCol = true,
+                    CanEnter    = true,
+                    IsDead      = false,
+                    BaseName    = e.DllPath
+                });
+            }
+        }
+
+        if (reg.Count == 0 && avail.Count == 0)
+            items.Add(new NavItem { Name = "(comcntr.dll не найден)", CanEnter = false, ShowDescCol = false });
+
+        int regCount = reg.Count;
+        return new NavLevel
+        {
+            Kind  = NavLevelKind.ComRoot,
+            Title = $"COM Коннектор  [{regCount} зарег. / {avail.Count} доступно]",
+            Items = items
+        };
+    }
+
+    private void DoComAction(NavItem item)
+    {
+        if (item.BaseName == null) return;
+
+        // Зарегистрированная запись — предлагаем удалить
+        var registered = _com.Registered.FirstOrDefault(e => e.ProgId == item.BaseName);
+        if (registered != null)
+        {
+            if (!ConsoleDialog.Confirm("Удалить регистрацию",
+                $"Удалить COM-коннектор?\n\nProgID:  {registered.ProgId}\nDLL:     {registered.DllPath}\nТип:     {registered.Source}"))
+                return;
+            ConsoleDialog.ShowProgress("Удаление COM-регистрации...", _ => _com.Unregister(registered));
+            R.Invalidate();
+            _nav.Pop();
+            _nav.Push(MakeComLevel());
+            return;
+        }
+
+        // Доступная запись — предлагаем зарегистрировать
+        var available = _com.Available.FirstOrDefault(e => e.DllPath == item.BaseName);
+        if (available == null) return;
+
+        string defaultProgId = ComEntry.DefaultProgId(available.DllPath);
+        var progId = ConsoleDialog.InputText(
+            "Регистрация COM-коннектора",
+            $"DLL: {available.DllPath}\n\nProgID для регистрации:",
+            defaultProgId);
+        if (string.IsNullOrWhiteSpace(progId)) return;
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Регистрация COM-коннектора...", msgs =>
+        {
+            try
+            {
+                msgs($"Регистрируем {progId}...");
+                _com.Register(available.DllPath, progId.Trim());
+                msgs("Готово.");
+                Logger.Info($"COM: зарегистрован {progId} → {available.DllPath}");
+            }
+            catch (Exception ex)
+            {
+                err = ex.Message;
+                Logger.Error($"COM регистрация: {ex.Message}");
+            }
+        });
+        if (err != null)
+            ConsoleDialog.ShowText("Ошибка регистрации COM", err);
+        R.Invalidate();
+        _nav.Pop();
+        _nav.Push(MakeComLevel());
     }
 
     private void DoWebInfo(string? alias)
@@ -3096,6 +3230,10 @@ public class FarApp
                 int cfFound = _configs.Files.Count(f => f.Found);
                 int cfTotal = _configs.Files.Count;
                 inner = $"{cfFound}/{cfTotal}";
+                break;
+            case "com":
+                int comReg = _com.Registered.Count;
+                inner = comReg > 0 ? comReg.ToString() : " ";
                 break;
             default:
                 inner = " ";
