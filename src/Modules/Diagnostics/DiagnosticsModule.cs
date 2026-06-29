@@ -96,6 +96,7 @@ public class DiagnosticsModule
         var result = new List<OneCVersion>();
         var seen   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // 1. Реестр: HKLM\SOFTWARE\1C\1Cv8 (64- и 32-битный view)
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
             try
@@ -106,29 +107,76 @@ public class DiagnosticsModule
 
                 foreach (var ver in key.GetSubKeyNames())
                 {
-                    using var vk   = key.OpenSubKey(ver);
+                    using var vk = key.OpenSubKey(ver);
                     var path = vk?.GetValue("InstallPath") as string;
                     if (string.IsNullOrEmpty(path) || !seen.Add(ver)) continue;
 
-                    var v = new OneCVersion { Version = ver, InstallPath = path };
-                    v.HasServer = File.Exists(Path.Combine(path, "ragent.exe"));
-                    v.HasThick  = File.Exists(Path.Combine(path, "1cv8.exe"));
-                    v.HasThin   = File.Exists(Path.Combine(path, "1cv8c.exe"));
-                    v.HasCom    = File.Exists(Path.Combine(path, "comcntr.dll"));
-                    v.HasWeb    = File.Exists(Path.Combine(path, "wsisapi.dll"));
-                    v.HasIbcmd  = File.Exists(Path.Combine(path, "ibcmd.exe"));
-                    v.HasRing   = File.Exists(Path.Combine(path, @"ring\ring.cmd"));
-
-                    if (v.HasCom)
-                        v.ComVer = BuildComVer(ver);
-
-                    result.Add(v);
+                    result.Add(BuildVersion(ver, path));
                 }
             }
             catch { }
         }
 
+        // 2. Fallback: сканируем Program Files\1cv8\<версия>\bin
+        if (result.Count == 0)
+        {
+            var roots = new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                @"C:\Program Files\1cv8",
+                @"C:\Program Files (x86)\1cv8",
+            };
+
+            foreach (var root in roots)
+            {
+                try
+                {
+                    // Если root уже = "...\1cv8", берём его напрямую; иначе ищем 1cv8 внутри
+                    string dir1cv8 = root.EndsWith("1cv8", StringComparison.OrdinalIgnoreCase)
+                        ? root
+                        : Path.Combine(root, "1cv8");
+
+                    if (!Directory.Exists(dir1cv8)) continue;
+
+                    foreach (var vDir in Directory.GetDirectories(dir1cv8))
+                    {
+                        var ver = Path.GetFileName(vDir);
+                        if (ver.Split('.').Length != 4) continue; // не похоже на версию
+                        if (!seen.Add(ver)) continue;
+
+                        // 1С кладёт exe в bin\ или прямо в папку версии
+                        var bin = Path.Combine(vDir, "bin");
+                        var instPath = Directory.Exists(bin) ? bin : vDir;
+
+                        // Проверяем что это реально установка 1С
+                        if (!File.Exists(Path.Combine(instPath, "1cv8.exe"))
+                         && !File.Exists(Path.Combine(instPath, "1cv8c.exe"))
+                         && !File.Exists(Path.Combine(instPath, "ragent.exe")))
+                            continue;
+
+                        result.Add(BuildVersion(ver, instPath));
+                    }
+                }
+                catch { }
+            }
+        }
+
         return result.OrderByDescending(v => v.Version).ToList();
+    }
+
+    private static OneCVersion BuildVersion(string ver, string path)
+    {
+        var v = new OneCVersion { Version = ver, InstallPath = path };
+        v.HasServer = File.Exists(Path.Combine(path, "ragent.exe"));
+        v.HasThick  = File.Exists(Path.Combine(path, "1cv8.exe"));
+        v.HasThin   = File.Exists(Path.Combine(path, "1cv8c.exe"));
+        v.HasCom    = File.Exists(Path.Combine(path, "comcntr.dll"));
+        v.HasWeb    = File.Exists(Path.Combine(path, "wsisapi.dll"));
+        v.HasIbcmd  = File.Exists(Path.Combine(path, "ibcmd.exe"));
+        v.HasRing   = File.Exists(Path.Combine(path, @"ring\ring.cmd"));
+        if (v.HasCom) v.ComVer = BuildComVer(ver);
+        return v;
     }
 
     private static string BuildComVer(string version)
