@@ -218,6 +218,28 @@ public class ComModule
         return found;
     }
 
+    // ── COM+ helpers: Value(key) — параметрическое свойство, нельзя присваивать через dynamic ──
+
+    private static void SetVal(object obj, string name, object value) =>
+        obj.GetType().InvokeMember("Value",
+            System.Reflection.BindingFlags.SetProperty,
+            null, obj, new object[] { name, value });
+
+    private static object? GetVal(object obj, string name) =>
+        obj.GetType().InvokeMember("Value",
+            System.Reflection.BindingFlags.GetProperty,
+            null, obj, new object[] { name });
+
+    private static object? GetKey(object obj) =>
+        obj.GetType().InvokeMember("Key",
+            System.Reflection.BindingFlags.GetProperty,
+            null, obj, null);
+
+    private static object? GetName(object obj) =>
+        obj.GetType().InvokeMember("Name",
+            System.Reflection.BindingFlags.GetProperty,
+            null, obj, null);
+
     // ── Регистрация через COM+ ────────────────────────────────────────────────
 
     public void Register(string dllPath, string progId)
@@ -235,29 +257,23 @@ public class ComModule
         int removeIdx = -1, idx = 0;
         foreach (dynamic app in apps)
         {
-            if (string.Equals(app.Value("Name") as string, appName, StringComparison.OrdinalIgnoreCase))
-            {
-                removeIdx = idx;
-                break;
-            }
+            string? n = GetVal(app, "Name") as string;
+            if (string.Equals(n, appName, StringComparison.OrdinalIgnoreCase))
+            { removeIdx = idx; break; }
             idx++;
         }
-        if (removeIdx >= 0)
-        {
-            apps.Remove(removeIdx);
-            apps.SaveChanges();
-        }
+        if (removeIdx >= 0) { apps.Remove(removeIdx); apps.SaveChanges(); }
 
         // 2. Создаём новое приложение
         apps = catalog.GetCollection("Applications");
         apps.Populate();
         dynamic newApp = apps.Add();
-        newApp.Value("ID")                          = appId;
-        newApp.Value("Name")                        = appName;
-        newApp.Value("Description")                 = $"1C COM Connector — {progId}";
-        newApp.Value("Activation")                  = "Local";
-        newApp.Value("ApplicationAccessChecksEnabled") = 0;
-        newApp.Value("AccessChecksLevel")           = 1;
+        SetVal(newApp, "ID",          appId);
+        SetVal(newApp, "Name",        appName);
+        SetVal(newApp, "Description", $"1C COM Connector — {progId}");
+        SetVal(newApp, "Activation",  "Local");
+        SetVal(newApp, "ApplicationAccessChecksEnabled", 0);
+        SetVal(newApp, "AccessChecksLevel", 1);
         apps.SaveChanges();
 
         // 3. Устанавливаем DLL в приложение
@@ -269,7 +285,7 @@ public class ComModule
         dynamic comps = apps.GetCollection("Components", appId);
         comps.Populate();
         string? firstKey = null;
-        foreach (dynamic comp in comps) { firstKey = comp.Key as string; break; }
+        foreach (dynamic comp in comps) { firstKey = GetKey(comp) as string; break; }
         if (firstKey != null)
             catalog.AliasComponent(appId, firstKey, appId, progId, "");
 
@@ -280,18 +296,14 @@ public class ComModule
         string? goodKey = null;
         foreach (dynamic comp in comps)
         {
-            string name = comp.Name as string ?? "";
-            if (!string.Equals(name, progId, StringComparison.OrdinalIgnoreCase))
+            string compName = GetName(comp) as string ?? "";
+            if (!string.Equals(compName, progId, StringComparison.OrdinalIgnoreCase))
                 badIdx = compIdx;
             else
-                goodKey = comp.Key as string;
+                goodKey = GetKey(comp) as string;
             compIdx++;
         }
-        if (badIdx >= 0)
-        {
-            comps.Remove(badIdx);
-            comps.SaveChanges();
-        }
+        if (badIdx >= 0) { comps.Remove(badIdx); comps.SaveChanges(); }
 
         // 6. Добавляем роль CreatorOwner
         try
@@ -301,11 +313,12 @@ public class ComModule
             dynamic roles = apps.GetCollection("Roles", appId);
             roles.Populate();
             bool hasRole = false;
-            foreach (dynamic r in roles) { if ((r.Key as string) == "CreatorOwner") { hasRole = true; break; } }
+            foreach (dynamic r in roles)
+                if (string.Equals(GetKey(r) as string, "CreatorOwner")) { hasRole = true; break; }
             if (!hasRole)
             {
                 dynamic role = roles.Add();
-                role.Value("Name") = "CreatorOwner";
+                SetVal(role, "Name", "CreatorOwner");
                 roles.SaveChanges();
             }
         }
@@ -354,7 +367,7 @@ public class ComModule
             int removeIdx = -1, idx = 0;
             foreach (dynamic app in apps)
             {
-                string name = app.Value("Name") as string ?? "";
+                string name = GetVal(app, "Name") as string ?? "";
                 if (string.Equals(name, entry.ComAppName, StringComparison.OrdinalIgnoreCase))
                 { removeIdx = idx; break; }
                 idx++;
