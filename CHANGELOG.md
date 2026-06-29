@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.53] — 2026-06-29
+- **feat** Регистрация RAS как Windows-сервиса ([#1](https://github.com/iMironRU/Clinkon1C/issues/1)). Раздел Агенты: секция RAS с установленными службами и `+ Установить RAS` для доступных версий. Форма: порт/агент/пользователь/пароль. Start/Stop/Restart/Delete через SCM P/Invoke.
+
 ## [v1.2.52] — 2026-06-29
 - **fix** `Confirm` — клавиши Y/N работают в любой раскладке клавиатуры (только `ConsoleKey`, без `KeyChar`). Аналогично A в `MultiSelect`, S в `ShowText`.
 
