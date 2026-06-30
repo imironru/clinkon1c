@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Clinkon1C.Core;
 using Microsoft.Win32;
 
 namespace Clinkon1C.Modules.Firewall;
