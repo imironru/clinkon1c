@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.56] — 2026-06-30
+- **refactor** Унификация живых кнопок во всех диалогах выбора ([#17](https://github.com/iMironRU/Clinkon1C/issues/17)). `DrawBtns()` — единый рендер кнопок (Black/Cyan активная, Yellow/DarkBlue неактивная). `Confirm()` принимает `yesLabel`/`noLabel`. Все стартовые диалоги переписаны через `Confirm()` с именованными кнопками. `ShowElevationMenu` → 3 живые кнопки с ←→ Tab.
+
 ## [v1.2.55] — 2026-06-30
 - **refactor** Все диалоги через ConsoleDialog ([#16](https://github.com/iMironRU/Clinkon1C/issues/16)). `ShowWarningDialog`, `ShowElevationMenu`, `ShowUpdateDialog`, `ShowDotNetRequiredDialog` перенесены из `Program.cs`; `ShowLog`, `DrawSpinner`, `DrawProgressBar` из `FarApp.cs`. FarApp и Program не пишут в Console напрямую для UI.
 
