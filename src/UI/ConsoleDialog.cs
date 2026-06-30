@@ -87,7 +87,7 @@ internal static class ConsoleDialog
         int x      = (Console.WindowWidth  - w) / 2;
         int y      = 1;
         var raw    = text.Replace("\r", "").Split('\n');
-        var all    = WrapLines(raw, w - 5); // -1 для скроллбара
+        var all    = WrapLines(raw, w - 4); // совпадает с contentW в DrawScrollBody
         int scroll = 0;
 
         DrawScrollFrame(x, y, w, h, title);
@@ -570,29 +570,29 @@ internal static class ConsoleDialog
 
         var snap   = getEntries();
         int scroll = Math.Max(0, snap.Length - vis);
-
-        // Фон устанавливаем один раз — без Console.Clear() в цикле
         Console.BackgroundColor = ConsoleColor.Black;
+        Console.CursorVisible   = false;
 
         while (true)
         {
-            // Шапка
+            bool hasBar = snap.Length > vis;
+            int  thumbY = hasBar
+                ? (int)(scroll * (double)(vis - 1) / Math.Max(1, snap.Length - vis))
+                : -1;
+
+            // Шапка — единственный Pos() в начале кадра, дальше курсор идёт
+            // последовательно без прыжков: каждая строка = w символов → авто-перенос
             Pos(0, 0);
             CC(ConsoleColor.Black, ConsoleColor.DarkGray);
-            Console.Write(R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 Обновить  Tab/Esc Закрыть", w));
+            Console.Write(R.Fit(
+                $" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 Обновить  Tab/Esc Закрыть", w));
 
-            // Контент (w-1 чтобы освободить правый столбец для скроллбара)
-            int contentW = w - 1;
+            // Контент (w-1) + скроллбар (1) = w символов → курсор переходит на
+            // следующую строку автоматически, без отдельного Pos()
             for (int i = 0; i < vis; i++)
             {
                 int li = scroll + i;
-                Pos(0, i + 1);
-                if (li >= snap.Length)
-                {
-                    CC(ConsoleColor.DarkGray, ConsoleColor.Black);
-                    Console.Write(new string(' ', contentW));
-                }
-                else
+                if (li < snap.Length)
                 {
                     var (lvl, txt) = snap[li];
                     ConsoleColor fg = lvl switch
@@ -603,19 +603,24 @@ internal static class ConsoleDialog
                         _      => ConsoleColor.DarkGray,
                     };
                     CC(fg, ConsoleColor.Black);
-                    Console.Write(R.Fit("  " + txt, contentW));
+                    Console.Write(R.Fit("  " + txt, w - 1));
                 }
+                else
+                {
+                    CC(ConsoleColor.DarkGray, ConsoleColor.Black);
+                    Console.Write(new string(' ', w - 1));
+                }
+                // Скроллбар: cursor уже на (w-1, i+1) — пишем без Pos()
+                CC(ConsoleColor.DarkGray, ConsoleColor.Black);
+                Console.Write(hasBar ? (i == thumbY ? '█' : '░') : ' ');
             }
-
-            // Скроллбар — правый столбец
-            DrawLogScrollbar(scroll, snap.Length, vis, w - 1);
 
             // Подвал: диапазон слева, процент справа
             int from = snap.Length == 0 ? 0 : scroll + 1;
             int to   = Math.Min(snap.Length, scroll + vis);
             int pct  = snap.Length <= vis ? 100
                      : (int)(scroll * 100.0 / Math.Max(1, snap.Length - vis));
-            var pctStr  = $" {pct}% ";
+            var pctStr  = $" {pct}%";
             var leftStr = $" {from}–{to} из {snap.Length}";
             Pos(0, h - 1);
             CC(ConsoleColor.Black, ConsoleColor.DarkGray);
@@ -637,24 +642,6 @@ internal static class ConsoleDialog
             }
         }
         R.Invalidate();
-    }
-
-    private static void DrawLogScrollbar(int scroll, int total, int vis, int col)
-    {
-        if (total <= vis)
-        {
-            // Всё влезает — пустой столбец
-            CC(ConsoleColor.DarkGray, ConsoleColor.Black);
-            for (int i = 0; i < vis; i++) { Pos(col, i + 1); Console.Write(' '); }
-            return;
-        }
-        int thumbY = (int)(scroll * (double)(vis - 1) / Math.Max(1, total - vis));
-        CC(ConsoleColor.DarkGray, ConsoleColor.Black);
-        for (int i = 0; i < vis; i++)
-        {
-            Pos(col, i + 1);
-            Console.Write(i == thumbY ? '█' : '░');
-        }
     }
 
     // ── Спиннер без ввода (вызывается из цикла опроса) ───────────────────────
@@ -801,36 +788,27 @@ internal static class ConsoleDialog
         Bot(x, y + h - 1, w);
     }
 
-    // Только контент + скроллбар + подсказка — без перерисовки рамки
+    // Только контент + скроллбар + подсказка — без перерисовки рамки.
+    // Скроллбар пишется сразу после строки контента: cursor уже на x+w-2 → нет Pos().
     private static void DrawScrollBody(string[] lines, int scroll, int innerH,
         int x, int y, int w, int h, bool hasSave, string? overrideHint)
     {
-        int contentW = w - 5; // -2 границы, -2 отступы, -1 скроллбар
+        // contentW=w-4: текст x+2..x+w-3, cursor после записи = x+w-2 (позиция скроллбара)
+        int contentW = w - 4;
+        bool hasBar  = lines.Length > innerH;
+        int  thumbY  = hasBar
+            ? (int)(scroll * (double)(innerH - 1) / Math.Max(1, lines.Length - innerH))
+            : -1;
 
         for (int i = 0; i < innerH; i++)
         {
             int li = scroll + i;
-            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
             Pos(x + 2, y + 2 + i);
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
             Console.Write(R.Fit(li < lines.Length ? lines[li] : "", contentW));
-        }
-
-        // Скроллбар (столбец x + w - 2, внутри правой границы)
-        int sbCol = x + w - 2;
-        if (lines.Length > innerH)
-        {
-            int thumbY = (int)(scroll * (double)(innerH - 1) / Math.Max(1, lines.Length - innerH));
-            for (int i = 0; i < innerH; i++)
-            {
-                Pos(sbCol, y + 2 + i);
-                CC(ConsoleColor.DarkGray, ConsoleColor.DarkBlue);
-                Console.Write(i == thumbY ? '█' : '░');
-            }
-        }
-        else
-        {
-            CC(ConsoleColor.DarkBlue, ConsoleColor.DarkBlue);
-            for (int i = 0; i < innerH; i++) { Pos(sbCol, y + 2 + i); Console.Write(' '); }
+            // Cursor на x+w-2 — скроллбар без Pos()
+            CC(ConsoleColor.DarkGray, ConsoleColor.DarkBlue);
+            Console.Write(hasBar ? (i == thumbY ? '█' : '░') : ' ');
         }
 
         // Подсказка + процент
