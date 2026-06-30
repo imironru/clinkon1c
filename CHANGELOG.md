@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.55] — 2026-06-30
+- **refactor** Все диалоги через ConsoleDialog ([#16](https://github.com/iMironRU/Clinkon1C/issues/16)). `ShowWarningDialog`, `ShowElevationMenu`, `ShowUpdateDialog`, `ShowDotNetRequiredDialog` перенесены из `Program.cs`; `ShowLog`, `DrawSpinner`, `DrawProgressBar` из `FarApp.cs`. FarApp и Program не пишут в Console напрямую для UI.
+
 ## [v1.2.54] — 2026-06-30
 - **feat** Tab — полноэкранный просмотр лога операций ([#15](https://github.com/iMironRU/Clinkon1C/issues/15)). Чёрный экран, цвет по уровню (INF/WARN/ERR), автоскролл к последней записи, F5 обновить, Tab/Esc закрыть. Вид кэша переехал на V.
 
