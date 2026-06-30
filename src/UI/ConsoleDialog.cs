@@ -449,6 +449,14 @@ internal static class ConsoleDialog
         }
     }
 
+    // Короткий результирующий диалог: компактное окно с одной кнопкой OK.
+    public static void ShowOk(string title, string message, string label = "  OK  ")
+    {
+        var lines = message.Replace("\r\n", "\n").Split('\n')
+                           .Select(l => l.TrimEnd('\r')).ToArray();
+        ShowInfo(title, lines, label);
+    }
+
     // ── Стартовые диалоги ────────────────────────────────────────────────────
 
     public static bool ShowWarningDialog()

@@ -1633,7 +1633,7 @@ public class FarApp
         if (entries.Count == 0) return;
 
         var profiles = ProfileFinder.FindProfiles();
-        if (profiles.Count == 0) { ConsoleDialog.ShowText("Базы", "Профили не найдены."); R.Invalidate(); return; }
+        if (profiles.Count == 0) { ConsoleDialog.ShowOk("Базы", "Профили не найдены."); R.Invalidate(); return; }
 
         var names    = profiles.Select(p => p.UserName).ToArray();
         var selected = ConsoleDialog.MultiSelect(
@@ -1649,7 +1649,7 @@ public class FarApp
             totalSkipped += skipped;
         }
 
-        ConsoleDialog.ShowText("Копирование завершено",
+        ConsoleDialog.ShowOk("Копирование завершено",
             $"Профилей: {selected.Count}\n" +
             $"Добавлено записей: {totalAdded}\n" +
             $"Уже существовало: {totalSkipped}");
@@ -1679,7 +1679,7 @@ public class FarApp
 
         _bases.ExportToV8i(entries, filePath);
 
-        ConsoleDialog.ShowText("Сохранено",
+        ConsoleDialog.ShowOk("Сохранено",
             $"Файл:\n{filePath}\n\nЗаписей: {entries.Count}");
         R.Invalidate();
         _markedBases.Clear();
@@ -1721,7 +1721,7 @@ public class FarApp
 
             if (err != null)
             {
-                ConsoleDialog.ShowText("Ошибка установки ring", err);
+                ConsoleDialog.ShowOk("Ошибка установки ring", err);
                 R.Invalidate();
                 return;
             }
@@ -1747,7 +1747,7 @@ public class FarApp
 
             if (err != null)
             {
-                ConsoleDialog.ShowText("Ошибка загрузки JRE", err);
+                ConsoleDialog.ShowOk("Ошибка загрузки JRE", err);
                 R.Invalidate();
                 return;
             }
@@ -1828,11 +1828,11 @@ public class FarApp
                 var desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                 var fpath   = System.IO.Path.Combine(desktop, $"license_{safeName}.txt");
                 System.IO.File.WriteAllText(fpath, fullSaveText, System.Text.Encoding.UTF8);
-                ConsoleDialog.ShowText("Сохранено", fpath);
+                ConsoleDialog.ShowOk("Сохранено", fpath);
             }
             catch (Exception ex)
             {
-                ConsoleDialog.ShowText("Ошибка сохранения", ex.Message);
+                ConsoleDialog.ShowOk("Ошибка сохранения", ex.Message);
             }
         });
         R.Invalidate();
@@ -1911,9 +1911,9 @@ public class FarApp
         });
         R.Invalidate();
 
-        ConsoleDialog.ShowText(
+        ConsoleDialog.ShowOk(
             result.res ? "Лицензия действительна" : "Ошибка проверки",
-            (string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "OK" : "Ошибка") : result.msg));
+            string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "OK" : "Ошибка") : result.msg);
         R.Invalidate();
     }
 
@@ -1935,7 +1935,7 @@ public class FarApp
         });
         R.Invalidate();
 
-        ConsoleDialog.ShowText(
+        ConsoleDialog.ShowOk(
             result.res ? "Удалено" : "Ошибка удаления",
             string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "Успешно" : "Ошибка") : result.msg);
         R.Invalidate();
@@ -1983,7 +1983,7 @@ public class FarApp
 
         if (string.IsNullOrWhiteSpace(p.Serial) || string.IsNullOrWhiteSpace(p.Pin))
         {
-            ConsoleDialog.ShowText("Ошибка", "Серийный номер и пин-код обязательны.");
+            ConsoleDialog.ShowOk("Ошибка", "Серийный номер и пин-код обязательны.");
             R.Invalidate();
             return;
         }
@@ -1995,7 +1995,7 @@ public class FarApp
         });
         R.Invalidate();
 
-        ConsoleDialog.ShowText(
+        ConsoleDialog.ShowOk(
             result.res ? "Активация выполнена" : "Ошибка активации",
             string.IsNullOrWhiteSpace(result.msg) ? (result.res ? "Успешно" : "Ошибка") : result.msg);
         R.Invalidate();
@@ -2158,7 +2158,7 @@ public class FarApp
             }
         });
         if (err != null)
-            ConsoleDialog.ShowText("Ошибка регистрации COM", err);
+            ConsoleDialog.ShowOk("Ошибка регистрации COM", err);
         R.Invalidate();
         _nav.Pop();
         _nav.Push(MakeComLevel());
@@ -2200,7 +2200,7 @@ public class FarApp
                     }
                     catch (Exception ex) { err = ex.Message; Logger.Error($"COM: {ex.Message}"); }
                 });
-                if (err != null) ConsoleDialog.ShowText("Ошибка", err);
+                if (err != null) ConsoleDialog.ShowOk("Ошибка", err);
             }
         }
         else if (btn == 1) // Удалить
@@ -2307,7 +2307,7 @@ public class FarApp
     {
         if (!_web.ApacheFound)
         {
-            ConsoleDialog.ShowText("Ошибка", "Apache не обнаружен на этом компьютере.");
+            ConsoleDialog.ShowOk("Ошибка", "Apache не обнаружен на этом компьютере.");
             R.Invalidate();
             return;
         }
@@ -2327,7 +2327,7 @@ public class FarApp
 
         if (err != null)
         {
-            ConsoleDialog.ShowText("Ошибка публикации", err);
+            ConsoleDialog.ShowOk("Ошибка публикации", err);
             R.Invalidate();
             return;
         }
@@ -2364,7 +2364,7 @@ public class FarApp
 
         if (err != null)
         {
-            ConsoleDialog.ShowText("Ошибка", err);
+            ConsoleDialog.ShowOk("Ошибка", err);
             R.Invalidate();
             return;
         }
@@ -2413,9 +2413,9 @@ public class FarApp
         };
 
         if (err != null)
-            ConsoleDialog.ShowText("Ошибка Apache", err);
+            ConsoleDialog.ShowOk("Ошибка Apache", err);
         else
-            ConsoleDialog.ShowText("Apache", okMsg);
+            ConsoleDialog.ShowOk("Apache", okMsg);
         R.Invalidate();
 
         if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.WebRoot)
@@ -2462,7 +2462,7 @@ public class FarApp
             err = _web.UpdateVrd(e, anonUser, anonPwd, debugEnabled, debugProto, debugUrl, e.JwtBlockXml));
         R.Invalidate();
 
-        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); R.Invalidate(); return; }
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка", err); R.Invalidate(); return; }
 
         bool restart = ConsoleDialog.Confirm("Сохранено",
             $"{e.Alias} обновлена.\n\nПерезапустить Apache сейчас?");
@@ -2493,7 +2493,7 @@ public class FarApp
             var first = tempDoc.DocumentElement?.FirstChild as System.Xml.XmlElement;
             if (first?.LocalName != "accessTokenAuthentication")
             {
-                ConsoleDialog.ShowText("Ошибка XML",
+                ConsoleDialog.ShowOk("Ошибка XML",
                     $"Ожидается <accessTokenAuthentication>.\nПолучен: <{first?.LocalName ?? "?"}>");
                 R.Invalidate();
                 return;
@@ -2501,7 +2501,7 @@ public class FarApp
         }
         catch (Exception ex)
         {
-            ConsoleDialog.ShowText("Ошибка XML", ex.Message);
+            ConsoleDialog.ShowOk("Ошибка XML", ex.Message);
             R.Invalidate();
             return;
         }
@@ -2514,7 +2514,7 @@ public class FarApp
             err = _web.UpdateVrd(e, anonUser, anonPwd, e.DebugEnabled, e.DebugProtocol, e.DebugUrl, raw));
         R.Invalidate();
 
-        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); R.Invalidate(); return; }
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка", err); R.Invalidate(); return; }
 
         bool restart = ConsoleDialog.Confirm("JWT сохранён",
             $"{e.Alias} обновлена.\n\nПерезапустить Apache сейчас?");
@@ -2551,7 +2551,9 @@ public class FarApp
         if (e.DumpFound)
             sb.AppendLine($"  HKLM\\SYSTEM\\CurrentControlSet\\{e.Name}");
 
-        ConsoleDialog.ShowText($"Эмулятор — {e.Name}", sb.ToString().TrimEnd());
+        var eLines = sb.ToString().TrimEnd().Replace("\r\n", "\n").Split('\n')
+                        .Select(l => l.TrimEnd('\r')).ToArray();
+        ConsoleDialog.ShowInfo($"Эмулятор — {e.Name}", eLines, "  Закрыть  ");
         R.Invalidate();
     }
 
@@ -2580,7 +2582,7 @@ public class FarApp
         });
         R.Invalidate();
 
-        ConsoleDialog.ShowText(done ? "Готово" : "Ошибка", msg);
+        ConsoleDialog.ShowOk(done ? "Готово" : "Ошибка", msg);
         R.Invalidate();
 
         ConsoleDialog.ShowProgress("Повторное сканирование...", _ => _emulators.Scan());
@@ -2652,12 +2654,12 @@ public class FarApp
 
         if (err != null)
         {
-            ConsoleDialog.ShowText("Ошибка", err);
+            ConsoleDialog.ShowOk("Ошибка", err);
             R.Invalidate();
             return;
         }
 
-        ConsoleDialog.ShowText("Готово", $"Сохранено:\n{path}\n\nИзменения вступят в силу при следующем запуске 1С.");
+        ConsoleDialog.ShowOk("Готово", $"Сохранено:\n{path}\n\nИзменения вступят в силу при следующем запуске 1С.");
         R.Invalidate();
 
         // Обновляем путь если файл был создан
@@ -2749,7 +2751,7 @@ public class FarApp
 
         if (err != null)
         {
-            ConsoleDialog.ShowText("Ошибка", err);
+            ConsoleDialog.ShowOk("Ошибка", err);
             R.Invalidate();
             return;
         }
@@ -2768,7 +2770,7 @@ public class FarApp
         summary.AppendLine();
         summary.AppendLine("Перезапуск 1С не требуется — файл читается при старте каждого процесса.");
 
-        ConsoleDialog.ShowText("Готово", summary.ToString().TrimEnd());
+        ConsoleDialog.ShowOk("Готово", summary.ToString().TrimEnd());
         R.Invalidate();
 
         ConsoleDialog.ShowProgress("Обновление...", _ => _configs.Refresh());
@@ -2809,7 +2811,9 @@ public class FarApp
             sb.AppendLine($"  {e.CmdLine}");
         }
 
-        ConsoleDialog.ShowText($"Процесс PID {e.Pid}", sb.ToString());
+        var pLines = sb.ToString().TrimEnd().Replace("\r\n", "\n").Split('\n')
+                       .Select(l => l.TrimEnd('\r')).ToArray();
+        ConsoleDialog.ShowInfo($"Процесс PID {e.Pid}", pLines, "  Закрыть  ");
         R.Invalidate();
     }
 
@@ -2829,7 +2833,7 @@ public class FarApp
 
         var err = _processes.Kill(pid);
         R.Invalidate();
-        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); R.Invalidate(); }
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка", err); R.Invalidate(); }
         _processes.Refresh();
         RebuildCurrentLevel();
     }
@@ -2850,7 +2854,7 @@ public class FarApp
 
         if (errors?.Count > 0)
         {
-            ConsoleDialog.ShowText("Ошибки", string.Join("\n", errors));
+            ConsoleDialog.ShowOk("Ошибки", string.Join("\n", errors));
             R.Invalidate();
         }
 
@@ -2949,12 +2953,12 @@ public class FarApp
     {
         if (op == "stop" && !e.IsRunning)
         {
-            ConsoleDialog.ShowText("Стоп", $"Служба уже остановлена:\n{e.DisplayName}");
+            ConsoleDialog.ShowOk("Стоп", $"Служба уже остановлена:\n{e.DisplayName}");
             R.Invalidate(); return;
         }
         if (op == "start" && e.IsRunning)
         {
-            ConsoleDialog.ShowText("Запуск", $"Служба уже запущена:\n{e.DisplayName}");
+            ConsoleDialog.ShowOk("Запуск", $"Служба уже запущена:\n{e.DisplayName}");
             R.Invalidate(); return;
         }
         if (op is "stop" or "restart")
@@ -2980,9 +2984,9 @@ public class FarApp
 
         var doneTitle = op switch { "start" => "Запущено", "stop" => "Остановлено", _ => "Перезапущено" };
         if (err != null)
-            ConsoleDialog.ShowText($"Ошибка: {title.ToLower()}", err);
+            ConsoleDialog.ShowOk($"Ошибка: {title.ToLower()}", err);
         else
-            ConsoleDialog.ShowText(doneTitle, $"✓ {doneTitle}:\n{e.DisplayName}");
+            ConsoleDialog.ShowOk(doneTitle, $"✓ {doneTitle}:\n{e.DisplayName}");
         R.Invalidate();
     }
 
@@ -3054,7 +3058,7 @@ public class FarApp
 
         if (err != null)
         {
-            ConsoleDialog.ShowText("Ошибка", err);
+            ConsoleDialog.ShowOk("Ошибка", err);
             R.Invalidate();
             _agents.Refresh();
             RebuildCurrentLevel();
@@ -3071,7 +3075,7 @@ public class FarApp
                 ConsoleDialog.ShowProgress("Перезапуск...",
                     _ => re = _agents.RestartService(e.ServiceKey));
                 R.Invalidate();
-                if (re != null) { ConsoleDialog.ShowText("Ошибка перезапуска", re); R.Invalidate(); }
+                if (re != null) { ConsoleDialog.ShowOk("Ошибка перезапуска", re); R.Invalidate(); }
             }
             else R.Invalidate();
         }
@@ -3082,7 +3086,7 @@ public class FarApp
         var versions = RagentModule.FindVersions();
         if (versions.Count == 0)
         {
-            ConsoleDialog.ShowText("Агенты",
+            ConsoleDialog.ShowOk("Агенты",
                 "Установки 1С с ragent.exe не найдены.\n\nПуть поиска:\n  %ProgramFiles%\\1cv8\\*\\bin\\ragent.exe");
             R.Invalidate(); return;
         }
@@ -3136,7 +3140,7 @@ public class FarApp
 
         if (!int.TryParse(vals["port"], out int port) || port < 1 || port > 65535)
         {
-            ConsoleDialog.ShowText("Ошибка", "Некорректный порт.");
+            ConsoleDialog.ShowOk("Ошибка", "Некорректный порт.");
             R.Invalidate(); return;
         }
 
@@ -3154,9 +3158,9 @@ public class FarApp
         ConsoleDialog.ShowProgress("Создание службы...", _ => err = _agents.CreateAgent(cp));
         R.Invalidate();
 
-        if (err != null) { ConsoleDialog.ShowText("Ошибка создания", err); R.Invalidate(); return; }
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка создания", err); R.Invalidate(); return; }
 
-        ConsoleDialog.ShowText("Готово",
+        ConsoleDialog.ShowOk("Готово",
             $"Агент на порту {port} зарегистрирован.\n\nВ списке нажмите [S] для запуска.");
         R.Invalidate();
 
@@ -3178,7 +3182,7 @@ public class FarApp
             _ => err = _agents.DeleteAgent(e.ServiceKey));
         R.Invalidate();
 
-        if (err != null) { ConsoleDialog.ShowText("Ошибка удаления", err); R.Invalidate(); }
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка удаления", err); R.Invalidate(); }
         _agents.Refresh();
         RebuildCurrentLevel();
     }
@@ -3216,8 +3220,8 @@ public class FarApp
                         return true;
                     string? err = null;
                     ConsoleDialog.ShowProgress($"Удаление: {e.DisplayName}", _ => err = _agents.DeleteRas(e.ServiceKey));
-                    if (err != null) ConsoleDialog.ShowText("Ошибка удаления", err);
-                    else ConsoleDialog.ShowText("Готово", $"✓ Служба RAS удалена:\n{e.DisplayName}");
+                    if (err != null) ConsoleDialog.ShowOk("Ошибка удаления", err);
+                    else ConsoleDialog.ShowOk("Готово", $"✓ Служба RAS удалена:\n{e.DisplayName}");
                     _agents.Refresh();
                     RebuildCurrentLevel();
                     return false;
@@ -3257,7 +3261,7 @@ public class FarApp
 
         if (!int.TryParse(vals["port"], out int rasPort) || rasPort < 1 || rasPort > 65535)
         {
-            ConsoleDialog.ShowText("Ошибка", "Некорректный порт.");
+            ConsoleDialog.ShowOk("Ошибка", "Некорректный порт.");
             return;
         }
 
@@ -3265,9 +3269,9 @@ public class FarApp
         ConsoleDialog.ShowProgress($"Регистрация RAS {version}...", _ =>
             err = _agents.CreateRas(rasExe, rasPort, vals["agent"], vals["user"], vals["pwd"]));
 
-        if (err != null) { ConsoleDialog.ShowText("Ошибка", err); return; }
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка", err); return; }
 
-        ConsoleDialog.ShowText("Готово",
+        ConsoleDialog.ShowOk("Готово",
             $"✓ RAS зарегистрирован.\n\nВерсия: {version}\nПорт: {rasPort}\n\nВ списке нажмите [S] для запуска.");
 
         _agents.Refresh();
@@ -3334,8 +3338,8 @@ public class FarApp
         });
 
         var doneTitle = op switch { "start" => "Запущено", "stop" => "Остановлено", _ => "Перезапущено" };
-        if (err != null) ConsoleDialog.ShowText($"Ошибка: {title.ToLower()}", err);
-        else ConsoleDialog.ShowText(doneTitle, $"✓ {doneTitle}:\n{displayName}");
+        if (err != null) ConsoleDialog.ShowOk($"Ошибка: {title.ToLower()}", err);
+        else ConsoleDialog.ShowOk(doneTitle, $"✓ {doneTitle}:\n{displayName}");
     }
 
     // ── Лог ───────────────────────────────────────────────────────────────────
