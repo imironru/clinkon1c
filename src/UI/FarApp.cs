@@ -10,6 +10,7 @@ using Clinkon1C.Modules.Licenses;
 using Clinkon1C.Modules.Processes;
 using Clinkon1C.Modules.Templates;
 using Clinkon1C.Modules.COM;
+using Clinkon1C.Modules.Firewall;
 using Clinkon1C.Modules.Web;
 
 namespace Clinkon1C.UI;
@@ -85,6 +86,7 @@ public class FarApp
     private readonly ConfigsModule      _configs;
     private readonly DiagnosticsModule  _diagnostics;
     private readonly ComModule          _com;
+    private readonly FirewallModule     _firewall = new();
     private volatile string?          _updateNotice;
     private readonly Func<string?>?   _updateChecker;
 
@@ -239,6 +241,7 @@ public class FarApp
             ("Конфиги...",      () => _configs.Refresh()),
             ("Диагностика...",  () => _diagnostics.ScanSync()),
             ("COM...",          () => _com.Scan()),
+            ("Брандмауэр...",   () => _firewall.Refresh()),
         };
 
         int total = steps.Length;
@@ -422,6 +425,15 @@ public class FarApp
                     ModuleId    = "com",
                     Paths       = new List<string>(),
                     Description = "comcntr.dll / COM+"
+                },
+                new NavItem
+                {
+                    Name        = "Брандмауэр",
+                    SizeBytes   = 0,
+                    CanEnter    = true,
+                    ModuleId    = "firewall",
+                    Paths       = new List<string>(),
+                    Description = "порты 1С (1540–1591)"
                 }
             }
         };
@@ -1122,6 +1134,8 @@ public class FarApp
                     EnterConfigs();
                 else if (item.ModuleId == "com")
                     EnterCom();
+                else if (item.ModuleId == "firewall")
+                    DoFirewallInfo();
                 break;
 
             case NavLevelKind.CacheRoot:
@@ -2581,6 +2595,73 @@ public class FarApp
         RebuildCurrentLevel();
     }
 
+    // ── Брандмауэр ───────────────────────────────────────────────────────────
+
+    private void DoFirewallInfo()
+    {
+        while (true)
+        {
+            _firewall.Refresh();
+            var inRule  = _firewall.Rules.FirstOrDefault(r =>
+                string.Equals(r.Direction, "In", StringComparison.OrdinalIgnoreCase));
+            var outRule = _firewall.Rules.FirstOrDefault(r =>
+                string.Equals(r.Direction, "Out", StringComparison.OrdinalIgnoreCase));
+
+            string RuleStatus(FirewallRule? r) => r == null
+                ? "[ ] отсутствует"
+                : (r.Enabled
+                    ? $"[✓] {r.Action}  {r.Ports}"
+                    : $"[■] отключено  {r.Ports}");
+
+            var lines = new[]
+            {
+                $"Правило «{FirewallModule.RuleName}» — порты 1С",
+                "",
+                $"  Входящее:    {RuleStatus(inRule)}",
+                $"  Исходящее:   {RuleStatus(outRule)}",
+                "",
+                $"  Эталон:  {FirewallModule.PortSpec}",
+                $"           1540 Агент  1541 Менеджер  1545 RAS",
+                $"           1550 Доп.   1560-1591 Рабочие процессы",
+            };
+
+            int btn = ConsoleDialog.ShowInfo(
+                "Брандмауэр Windows — порты 1С",
+                lines,
+                "Создать/Обновить", "Удалить", "Закрыть");
+            R.Invalidate();
+
+            if (btn == 2 || btn < 0) break;
+
+            if (btn == 0)
+            {
+                string? err = null;
+                ConsoleDialog.ShowProgress("Настройка брандмауэра...",
+                    _ => { err = _firewall.CreateOrUpdate(); });
+                R.Invalidate();
+                if (err != null) { ConsoleDialog.ShowOk("Ошибка брандмауэра", err); R.Invalidate(); }
+                // цикл — показываем обновлённый статус
+            }
+            else if (btn == 1)
+            {
+                if (_firewall.Rules.Count == 0)
+                {
+                    ConsoleDialog.ShowOk("Брандмауэр", $"Правил «{FirewallModule.RuleName}» нет.");
+                    R.Invalidate();
+                }
+                else if (ConsoleDialog.Confirm("Удалить правила",
+                    $"Удалить правила брандмауэра «{FirewallModule.RuleName}» (in + out)?"))
+                {
+                    string? err = null;
+                    ConsoleDialog.ShowProgress("Удаление...", _ => { err = _firewall.Delete(); });
+                    R.Invalidate();
+                    if (err != null) { ConsoleDialog.ShowOk("Ошибка", err); R.Invalidate(); }
+                }
+                else R.Invalidate();
+            }
+        }
+    }
+
     // ── Эмуляторы HASP ───────────────────────────────────────────────────────
 
     private void DoEmulatorInfo(string? name)
@@ -3652,6 +3733,25 @@ public class FarApp
                 portLine.Append($"[{(open ? "✓" : " ")}] {port}  ");
             lines.Add((portLine.ToString().TrimEnd(), ConsoleColor.White));
         }
+
+        // ── Брандмауэр ───────────────────────────────────────────────────
+        lines.Add(("", R.PanelFg));
+        lines.Add((" Брандмауэр — правило «1c»", ConsoleColor.Cyan));
+        var fwIn  = _firewall.Rules.FirstOrDefault(r =>
+            string.Equals(r.Direction, "In",  StringComparison.OrdinalIgnoreCase));
+        var fwOut = _firewall.Rules.FirstOrDefault(r =>
+            string.Equals(r.Direction, "Out", StringComparison.OrdinalIgnoreCase));
+        string FwLine(string dir, FirewallRule? r)
+        {
+            if (r == null) return $"  [ ]  {dir,-12} нет правила";
+            string ind  = r.Enabled ? "[✓]" : "[■]";
+            string info = string.IsNullOrEmpty(r.Ports) ? r.Action : $"{r.Action}  {r.Ports}";
+            return $"  {ind}  {dir,-12} {info}";
+        }
+        var fwColor = (fwIn != null && fwIn.Enabled && fwOut != null && fwOut.Enabled)
+            ? ConsoleColor.Green : ConsoleColor.Yellow;
+        lines.Add((FwLine("Входящее",   fwIn),  fwIn  == null ? ConsoleColor.DarkGray : fwColor));
+        lines.Add((FwLine("Исходящее",  fwOut), fwOut == null ? ConsoleColor.DarkGray : fwColor));
 
         return lines;
     }
