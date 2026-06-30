@@ -3941,40 +3941,63 @@ public class FarApp
 
     private void DrawKeyBar()
     {
-        var kind  = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
-        var sort  = _cache.SortBy == SortMode.BySize ? "Размер▼" : "Имя▲";
-        var view  = _cache.ViewMode == CacheViewMode.ByUser ? "По базе" : "По польз.";
-        bool isBases = kind == NavLevelKind.BasesRoot;
-        bool showV = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
+        var kind = _nav.Count > 0 ? _nav.Peek().Kind : NavLevelKind.Home;
+        var view = _cache.ViewMode == CacheViewMode.ByUser ? "По базе" : "По польз.";
 
-        bool isLicenses  = kind == NavLevelKind.LicensesRoot;
-        bool isAgents    = kind == NavLevelKind.AgentsRoot;
-        bool isProcesses = kind == NavLevelKind.ProcessesRoot;
-        bool isWeb       = kind == NavLevelKind.WebRoot;
-        bool isEmulators = kind == NavLevelKind.EmulatorsRoot;
-        bool isConfigs   = kind == NavLevelKind.ConfigsRoot;
-        bool isCom       = kind == NavLevelKind.ComRoot;
-        var ver = Program.FullVersion;
-        var bar = isBases
-            ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
-            : isLicenses
-            ? $"[Enter] Инфо  [A] Активация  [V] Проверить  [Tab] Лог  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
-            : isAgents
-            ? $"[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [Tab] Лог  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
-            : isProcesses
-            ? $"[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
-            : isWeb
-            ? $"[Enter] Инфо  [E] Редактировать  [J] JWT  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
-            : isEmulators
-            ? $"[Enter] Детали  [D]/[F8] Удалить  [Tab] Лог  [F5] Повторить скан  [F10] Выход  {ver}"
-            : isConfigs
-            ? $"[Enter] Редактировать  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
-            : isCom
-            ? $"[Enter] Инфо/Зарегистрировать  [E] Изменить ProgID  [Tab] Лог  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
-            : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
-              + (showV ? $"  [V] {view}" : "")
-              + $"  [Tab] Лог  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";
+        // Секционные подсказки (только буквенные клавиши, без F-клавиш)
+        var left = kind switch
+        {
+            NavLevelKind.BasesRoot     => "[Пробел] Отметить  [C] Польз.  [E] .v8i",
+            NavLevelKind.LicensesRoot  => "[Enter] Инфо  [A] Активация  [V] Проверить",
+            NavLevelKind.AgentsRoot    => "[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый",
+            NavLevelKind.ProcessesRoot => "[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все",
+            NavLevelKind.WebRoot       => "[Enter] Инфо  [E] Редакт.  [J] JWT  [P] Публик.  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт",
+            NavLevelKind.EmulatorsRoot => "[Enter] Детали  [D] Удалить",
+            NavLevelKind.ConfigsRoot   => "[Enter] Редактировать",
+            NavLevelKind.ComRoot       => "[Enter] Инфо/Рег.  [E] ProgID",
+            NavLevelKind.CacheRoot or NavLevelKind.CacheUser
+                                       => $"[Пробел] Выделить  [V] {view}",
+            _                          => "[Пробел] Выделить",
+        };
+
+        // F8 в фиксированном хвосте: 1=активна, -1=серая (неактивна), 0=не показывать (уже в left)
+        var (f8State, f8Label) = kind switch
+        {
+            NavLevelKind.BasesRoot     => (-1, "Удалить"),
+            NavLevelKind.ConfigsRoot   => (-1, "Удалить"),
+            NavLevelKind.ProcessesRoot => (0,  ""),        // [K]/[F8] уже в left
+            NavLevelKind.WebRoot       => (0,  ""),        // [F8] Снять уже в left
+            _                          => (1,  "Удалить"),
+        };
+
+        // Фиксированный хвост в порядке F1→F5→F8→Tab(F9)→F10
+        const string TF1  = "  [F1] ?";
+        const string TF5  = "  [F5] Обновить";
+        const string TTab = "  [Tab] Лог";
+        const string TF10 = "  [F10] Выход";
+        var f8Part = f8State != 0 ? $"  [F8] {f8Label}" : "";
+        int tailLen = TF1.Length + TF5.Length + f8Part.Length + TTab.Length + TF10.Length;
+
+        // Версия прижата к правому краю
+        var ver  = $"  {Program.FullVersion}  ";
+        int verX = R.W - ver.Length;
+        int tailX = verX - tailLen;
+        int leftW = Math.Max(0, tailX);
+
         R.FillRow(KeyRow, R.HdrFg, R.HdrBg);
-        R.Put(0, KeyRow, bar, R.HdrFg, R.HdrBg);
+        R.Put(0, KeyRow, R.Fit(left, leftW), R.HdrFg, R.HdrBg);
+
+        int tx = tailX;
+        R.Put(tx, KeyRow, TF1,  R.HdrFg, R.HdrBg); tx += TF1.Length;
+        R.Put(tx, KeyRow, TF5,  R.HdrFg, R.HdrBg); tx += TF5.Length;
+        if (f8State != 0)
+        {
+            R.Put(tx, KeyRow, f8Part,
+                f8State > 0 ? R.HdrFg : R.DeadFg, R.HdrBg);
+            tx += f8Part.Length;
+        }
+        R.Put(tx, KeyRow, TTab, R.HdrFg, R.HdrBg); tx += TTab.Length;
+        R.Put(tx, KeyRow, TF10, R.HdrFg, R.HdrBg);
+        R.Put(verX, KeyRow, ver, R.HdrFg, R.HdrBg);
     }
 }
