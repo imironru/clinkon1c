@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.59] — 2026-06-30
+- **ux** ShowText → ShowOk/ShowInfo для коротких диалогов ([#20](https://github.com/iMironRU/Clinkon1C/issues/20)). `ConsoleDialog.ShowOk(title, message)` — компактное окно с кнопкой OK. Заменено ~30 `ShowText` с коротким контентом (ошибки, результаты операций). `DoEmulatorInfo`/`DoProcessInfo` → `ShowInfo`. `ShowText` оставлен только для длинного прокручиваемого контента.
+
 ## [v1.2.58] — 2026-06-30
 - **ux** COM инфо-диалог — компактное окно ([#19](https://github.com/iMironRU/Clinkon1C/issues/19)). `ConsoleDialog.ShowInfo(title, lines[], buttons[])` — центрированное окно минимальной высоты с кнопками внизу. `DoComInfo` переписан: три кнопки `[Изменить ProgID]` `[Удалить]` `[Закрыть]` с ←→ Tab навигацией.
 
