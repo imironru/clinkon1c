@@ -1356,6 +1356,8 @@ public class FarApp
                     DoWebUnpublish();
                 else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.EmulatorsRoot)
                     DoEmulatorRemove();
+                else if (_nav.Count > 0 && _nav.Peek().Kind == NavLevelKind.ComRoot)
+                    DoComDelete();
                 else
                     DoDelete();
                 break;
@@ -2062,7 +2064,7 @@ public class FarApp
             foreach (var e in reg)
             {
                 string src  = e.Source == "COM+" ? "COM+" : "regsvr32";
-                string warn = e.DllExists ? "" : " [!dll отсутствует]";
+                string warn = e.DllExists ? "" : "  [! dll не найдена]";
                 items.Add(new NavItem
                 {
                     Name        = e.ProgId,
@@ -2083,12 +2085,12 @@ public class FarApp
             {
                 items.Add(new NavItem
                 {
-                    Name        = e.DllPath,
-                    Description = "не зарегистрован",
+                    Name        = ComVersionFromPath(e.DllPath),
+                    Description = e.DllPath,
                     ShowDescCol = true,
                     CanEnter    = true,
                     IsDead      = false,
-                    BaseName    = e.DllPath
+                    BaseName    = e.DllPath  // lookup key
                 });
             }
         }
@@ -2096,34 +2098,39 @@ public class FarApp
         if (reg.Count == 0 && avail.Count == 0)
             items.Add(new NavItem { Name = "(comcntr.dll не найден)", CanEnter = false, ShowDescCol = false });
 
-        int regCount = reg.Count;
         return new NavLevel
         {
             Kind  = NavLevelKind.ComRoot,
-            Title = $"COM Коннектор  [{regCount} зарег. / {avail.Count} доступно]",
+            Title = $"COM Коннектор  [{reg.Count} зарег. / {avail.Count} доступно]",
             Items = items
         };
+    }
+
+    private static string ComVersionFromPath(string dllPath)
+    {
+        var parts = dllPath.Replace('\\', '/').Split('/');
+        for (int i = 0; i < parts.Length - 1; i++)
+            if (parts[i].Equals("1cv8", StringComparison.OrdinalIgnoreCase) && i + 1 < parts.Length)
+            {
+                var v = parts[i + 1];
+                if (v.Split('.').Length == 4) return v;
+            }
+        return Path.GetFileName(dllPath);
     }
 
     private void DoComAction(NavItem item)
     {
         if (item.BaseName == null) return;
 
-        // Зарегистрированная запись — предлагаем удалить
+        // Зарегистрированная запись — инфо-диалог
         var registered = _com.Registered.FirstOrDefault(e => e.ProgId == item.BaseName);
         if (registered != null)
         {
-            if (!ConsoleDialog.Confirm("Удалить регистрацию",
-                $"Удалить COM-коннектор?\n\nProgID:  {registered.ProgId}\nDLL:     {registered.DllPath}\nТип:     {registered.Source}"))
-                return;
-            ConsoleDialog.ShowProgress("Удаление COM-регистрации...", _ => _com.Unregister(registered));
-            R.Invalidate();
-            _nav.Pop();
-            _nav.Push(MakeComLevel());
+            DoComInfo(registered);
             return;
         }
 
-        // Доступная запись — предлагаем зарегистрировать
+        // Доступная запись — регистрация
         var available = _com.Available.FirstOrDefault(e => e.DllPath == item.BaseName);
         if (available == null) return;
 
@@ -2152,6 +2159,82 @@ public class FarApp
         });
         if (err != null)
             ConsoleDialog.ShowText("Ошибка регистрации COM", err);
+        R.Invalidate();
+        _nav.Pop();
+        _nav.Push(MakeComLevel());
+    }
+
+    private void DoComInfo(ComEntry e)
+    {
+        ConsoleDialog.ShowTextWithKeys(
+            () =>
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"ProgID:    {e.ProgId}");
+                sb.AppendLine($"DLL:       {e.DllPath}");
+                if (!string.IsNullOrEmpty(e.Clsid))
+                    sb.AppendLine($"CLSID:     {{{e.Clsid}}}");
+                sb.AppendLine($"Источник:  {e.Source}");
+                sb.AppendLine($"Файл DLL:  {(e.DllExists ? "✓ найдена" : "✗ не найдена")}");
+                return ($"COM-коннектор: {e.ProgId}", sb.ToString());
+            },
+            "[E] Изменить ProgID   [F8/Del] Удалить   Esc — закрыть",
+            (key, _) =>
+            {
+                if (key == ConsoleKey.E)
+                {
+                    var newId = ConsoleDialog.InputText("Изменить ProgID",
+                        $"DLL: {e.DllPath}\n\nНовый ProgID:", e.ProgId);
+                    if (string.IsNullOrWhiteSpace(newId) || newId.Trim() == e.ProgId)
+                        return true; // отмена — остаёмся
+                    string? err = null;
+                    ConsoleDialog.ShowProgress("Перерегистрация...", msgs =>
+                    {
+                        try
+                        {
+                            msgs($"Удаляем {e.ProgId}...");
+                            _com.Unregister(e);
+                            msgs($"Регистрируем {newId.Trim()}...");
+                            _com.Register(e.DllPath, newId.Trim());
+                            Logger.Info($"COM: переименован {e.ProgId} → {newId.Trim()}");
+                        }
+                        catch (Exception ex) { err = ex.Message; Logger.Error($"COM: {ex.Message}"); }
+                    });
+                    if (err != null) ConsoleDialog.ShowText("Ошибка", err);
+                    return false; // закрыть инфо
+                }
+                if (key == ConsoleKey.F8 || key == ConsoleKey.Delete)
+                {
+                    if (!ConsoleDialog.Confirm("Удалить регистрацию",
+                        $"Удалить COM-коннектор?\n\nProgID:  {e.ProgId}\nDLL:     {e.DllPath}\nТип:     {e.Source}",
+                        defaultYes: false, "  Удалить  ", "  Отмена  "))
+                        return true; // отмена — остаёмся
+                    ConsoleDialog.ShowProgress("Удаление...", _ => _com.Unregister(e));
+                    Logger.Info($"COM: удалена регистрация {e.ProgId}");
+                    return false; // закрыть инфо
+                }
+                return true;
+            });
+
+        R.Invalidate();
+        _nav.Pop();
+        _nav.Push(MakeComLevel());
+    }
+
+    private void DoComDelete()
+    {
+        if (_nav.Count == 0) return;
+        var lvl  = _nav.Peek();
+        var item = lvl.Items[lvl.Cursor];
+        if (item.IsUp || item.BaseName == null) return;
+        var e = _com.Registered.FirstOrDefault(r => r.ProgId == item.BaseName);
+        if (e == null) return;
+        if (!ConsoleDialog.Confirm("Удалить регистрацию",
+            $"Удалить COM-коннектор?\n\nProgID:  {e.ProgId}\nDLL:     {e.DllPath}\nТип:     {e.Source}",
+            defaultYes: false, "  Удалить  ", "  Отмена  "))
+            return;
+        ConsoleDialog.ShowProgress("Удаление...", _ => _com.Unregister(e));
+        Logger.Info($"COM: удалена регистрация {e.ProgId}");
         R.Invalidate();
         _nav.Pop();
         _nav.Push(MakeComLevel());
@@ -3867,6 +3950,7 @@ public class FarApp
         bool isWeb       = kind == NavLevelKind.WebRoot;
         bool isEmulators = kind == NavLevelKind.EmulatorsRoot;
         bool isConfigs   = kind == NavLevelKind.ConfigsRoot;
+        bool isCom       = kind == NavLevelKind.ComRoot;
         var ver = Program.FullVersion;
         var bar = isBases
             ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
@@ -3882,6 +3966,8 @@ public class FarApp
             ? $"[Enter] Детали  [D]/[F8] Удалить  [Tab] Лог  [F5] Повторить скан  [F10] Выход  {ver}"
             : isConfigs
             ? $"[Enter] Редактировать  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
+            : isCom
+            ? $"[Enter] Инфо/Зарегистрировать  [E] Изменить ProgID  [Tab] Лог  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
               + (showV ? $"  [V] {view}" : "")
               + $"  [Tab] Лог  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";
