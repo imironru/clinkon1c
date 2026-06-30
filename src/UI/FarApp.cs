@@ -1451,14 +1451,7 @@ public class FarApp
                 break;
 
             case ConsoleKey.Tab:
-                // Tab переключает вид только в контексте кэша
-                var tabKind = _nav.Peek().Kind;
-                if (tabKind == NavLevelKind.CacheRoot || tabKind == NavLevelKind.CacheUser)
-                {
-                    _cache.ViewMode = _cache.ViewMode == CacheViewMode.ByUser
-                        ? CacheViewMode.ByBase : CacheViewMode.ByUser;
-                    RebuildCurrentLevel();
-                }
+                ShowLogView();
                 break;
 
             default:
@@ -1489,6 +1482,13 @@ public class FarApp
                 else if (kind2 == NavLevelKind.EmulatorsRoot)
                 {
                     if (ch == 'd') DoEmulatorRemove();
+                }
+                else if (ch == 'v' &&
+                    (kind2 == NavLevelKind.CacheRoot || kind2 == NavLevelKind.CacheUser))
+                {
+                    _cache.ViewMode = _cache.ViewMode == CacheViewMode.ByUser
+                        ? CacheViewMode.ByBase : CacheViewMode.ByUser;
+                    RebuildCurrentLevel();
                 }
                 else if (ch == 's')
                 {
@@ -1729,7 +1729,8 @@ public class FarApp
   Пробел                     Выделить (курсор сдвигается вниз)
   Esc                        Снять всё выделение
   S                          Сортировка: Имя ▲ / Размер ▼
-  Tab                        Вид: по пользователю / по базе
+  Tab                        Лог операций (полный экран)
+  V                          Кэш — вид: по пользователю / по базе
   Shift+Del                  Dry Run — предпросмотр удаления
   Del                        Удалить выделенное (или под курсором)
   F5                         Пересканировать
@@ -3310,6 +3311,79 @@ public class FarApp
         }
     }
 
+    private void ShowLogView()
+    {
+        int w = Console.WindowWidth;
+        int h = Console.WindowHeight;
+
+        (string Lvl, string Txt)[] snap;
+        lock (_logLock) { snap = _log.ToArray(); }
+
+        // Автоскролл к последней строке
+        int visibleLines = h - 2; // 1 строка шапка + 1 строка подсказка
+        int scroll = Math.Max(0, snap.Length - visibleLines);
+
+        while (true)
+        {
+            Console.BackgroundColor = ConsoleColor.Black;
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.Clear();
+
+            // Шапка
+            Console.SetCursorPosition(0, 0);
+            Console.BackgroundColor = ConsoleColor.DarkGray;
+            Console.ForegroundColor = ConsoleColor.Black;
+            Console.Write(R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 — обновить  Tab/Esc — закрыть", w));
+
+            // Строки лога
+            Console.BackgroundColor = ConsoleColor.Black;
+            for (int i = 0; i < visibleLines; i++)
+            {
+                int li = scroll + i;
+                Console.SetCursorPosition(0, i + 1);
+                if (li >= snap.Length)
+                {
+                    Console.Write(new string(' ', w));
+                    continue;
+                }
+                var (lvl, txt) = snap[li];
+                Console.ForegroundColor = lvl switch
+                {
+                    "ERR"  => ConsoleColor.Red,
+                    "WARN" => ConsoleColor.Yellow,
+                    "INF"  => ConsoleColor.Cyan,
+                    _      => ConsoleColor.DarkGray,
+                };
+                Console.Write(R.Fit("  " + txt, w));
+            }
+
+            // Подсказка внизу
+            Console.SetCursorPosition(0, h - 1);
+            Console.BackgroundColor = ConsoleColor.DarkGray;
+            Console.ForegroundColor = ConsoleColor.Black;
+            int from = snap.Length == 0 ? 0 : scroll + 1;
+            int to   = Math.Min(snap.Length, scroll + visibleLines);
+            Console.Write(R.Fit($" {from}–{to} из {snap.Length}", w));
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Tab || k.Key == ConsoleKey.Enter)
+                break;
+            if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
+            if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, snap.Length - visibleLines), scroll + 1);
+            if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - visibleLines);
+            if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, snap.Length - visibleLines), scroll + visibleLines);
+            if (k.Key == ConsoleKey.Home)       scroll = 0;
+            if (k.Key == ConsoleKey.End)        scroll = Math.Max(0, snap.Length - visibleLines);
+            if (k.Key == ConsoleKey.F5)
+            {
+                lock (_logLock) { snap = _log.ToArray(); }
+                scroll = Math.Max(0, snap.Length - visibleLines);
+            }
+        }
+
+        R.Invalidate();
+    }
+
     // ── Рисование ─────────────────────────────────────────────────────────────
     private void Draw()
     {
@@ -3893,7 +3967,7 @@ public class FarApp
         var sort  = _cache.SortBy == SortMode.BySize ? "Размер▼" : "Имя▲";
         var view  = _cache.ViewMode == CacheViewMode.ByUser ? "По базе" : "По польз.";
         bool isBases = kind == NavLevelKind.BasesRoot;
-        bool showTab = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
+        bool showV = kind == NavLevelKind.CacheRoot || kind == NavLevelKind.CacheUser;
 
         bool isLicenses  = kind == NavLevelKind.LicensesRoot;
         bool isAgents    = kind == NavLevelKind.AgentsRoot;
@@ -3903,22 +3977,22 @@ public class FarApp
         bool isConfigs   = kind == NavLevelKind.ConfigsRoot;
         var ver = Program.FullVersion;
         var bar = isBases
-            ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Пробел] Отметить  [C] Копировать польз.  [E] Экспорт .v8i  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
             : isLicenses
-            ? $"[Enter] Инфо  [A] Активация  [V] Проверить  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Enter] Инфо  [A] Активация  [V] Проверить  [Tab] Лог  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : isAgents
-            ? $"[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый  [Tab] Лог  [F8] Удалить  [F5] Обновить  [F10] Выход  {ver}"
             : isProcesses
-            ? $"[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
             : isWeb
-            ? $"[Enter] Инфо  [E] Редактировать  [J] JWT  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Enter] Инфо  [E] Редактировать  [J] JWT  [P] Опубликовать  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
             : isEmulators
-            ? $"[Enter] Детали  [D]/[F8] Удалить  [F5] Повторить скан  [F10] Выход  {ver}"
+            ? $"[Enter] Детали  [D]/[F8] Удалить  [Tab] Лог  [F5] Повторить скан  [F10] Выход  {ver}"
             : isConfigs
-            ? $"[Enter] Редактировать  [F5] Обновить  [F10] Выход  {ver}"
+            ? $"[Enter] Редактировать  [Tab] Лог  [F5] Обновить  [F10] Выход  {ver}"
             : $"[Пробел] Выделить  [S] {sort}  [F8] Удалить"
-              + (showTab ? $"  [Tab] {view}" : "")
-              + $"  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";
+              + (showV ? $"  [V] {view}" : "")
+              + $"  [Tab] Лог  [F5] Обновить  [F1] ?  [F10] Выход  {ver}";
         R.FillRow(KeyRow, R.HdrFg, R.HdrBg);
         R.Put(0, KeyRow, bar, R.HdrFg, R.HdrBg);
     }
