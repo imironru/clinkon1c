@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.64] — 2026-06-30
+- **fix** Кракозябры после WriteConsoleOutput ([#23](https://github.com/iMironRU/Clinkon1C/issues/23)). CharSet.Unicode в DllImport → резолвится в WriteConsoleOutputW вместо WriteConsoleOutputA; ANSI-версия читала только первый байт char, теряя верхний байт Юникода.
+
 ## [v1.2.63] — 2026-06-30
 - **fix** Мерцание ShowLog и DrawScroll — WriteConsoleOutput ([#25](https://github.com/iMironRU/Clinkon1C/issues/25)). `R.Flush()` теперь отправляет кадр через `kernel32!WriteConsoleOutput` — один системный вызов обновляет весь экран атомарно (FAR-стиль). Fallback на Console.Write если WCO недоступен. ShowLog и DrawScroll переведены на `R.Put()` + `R.Flush()`.
 

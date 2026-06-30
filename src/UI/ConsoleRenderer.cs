@@ -98,7 +98,7 @@ internal static class R
 
     // ── WriteConsoleOutput — атомарная запись прямоугольника ────────────────────
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool WriteConsoleOutput(
         IntPtr hConsoleOutput,
         [MarshalAs(UnmanagedType.LPArray), In] CHAR_INFO[] lpBuffer,
