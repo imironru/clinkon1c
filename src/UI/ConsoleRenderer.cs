@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Clinkon1C.UI;
@@ -79,22 +80,67 @@ internal static class R
     // ── Сброс буфера в терминал ──────────────────────────────────────────────
 
     /// <summary>
-    /// Пишет в терминал только ячейки, изменившиеся с последнего Flush.
-    /// Устраняет мерцание: экран не очищается, обновляются лишь дельты.
-    /// При dirty-флаге (после диалогов) — мгновенно очищает экран и рисует
-    /// построчно цветовыми сегментами, не по одному символу.
+    /// Отправляет кадр на экран через WriteConsoleOutput — один системный вызов,
+    /// атомарное обновление всей области (без мерцания). Fallback на Console.Write
+    /// если WCO недоступен (нет дескриптора или виртуальный терминал без ConHost).
     /// </summary>
     public static void Flush()
     {
         Console.CursorVisible = false;
+        if (TryFlushWco()) return;
 
-        if (_dirty)
-            FlushFull();
-        else
-            FlushDelta();
+        if (_dirty) FlushFull();
+        else        FlushDelta();
 
         _dirty = false;
-        Array.Clear(_cur, 0, _cur.Length); // очищаем кадр для следующей отрисовки
+        Array.Clear(_cur, 0, _cur.Length);
+    }
+
+    // ── WriteConsoleOutput — атомарная запись прямоугольника ────────────────────
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool WriteConsoleOutput(
+        IntPtr hConsoleOutput,
+        [MarshalAs(UnmanagedType.LPArray), In] CHAR_INFO[] lpBuffer,
+        COORD dwBufferSize, COORD dwBufferCoord,
+        ref SMALL_RECT lpWriteRegion);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct CHAR_INFO { [FieldOffset(0)] public char Char; [FieldOffset(2)] public short Attributes; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct COORD { public short X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SMALL_RECT { public short Left, Top, Right, Bottom; }
+
+    private const  int    STD_OUTPUT_HANDLE = -11;
+    private static IntPtr _hOut = IntPtr.Zero;
+
+    private static bool TryFlushWco()
+    {
+        if (_hOut == IntPtr.Zero) _hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (_hOut == new IntPtr(-1)) return false;
+
+        var ci = new CHAR_INFO[_w * _h];
+        for (int i = 0; i < _cur.Length && i < ci.Length; i++)
+        {
+            ref Cell c = ref _cur[i];
+            ci[i].Char       = c.Ch == '\0' ? ' ' : c.Ch;
+            ci[i].Attributes = (short)((int)c.Bg << 4 | (int)c.Fg);
+        }
+        var size   = new COORD    { X = (short)_w, Y = (short)_h };
+        var origin = new COORD    { X = 0, Y = 0 };
+        var rect   = new SMALL_RECT { Left = 0, Top = 0, Right = (short)(_w - 1), Bottom = (short)(_h - 1) };
+        if (!WriteConsoleOutput(_hOut, ci, size, origin, ref rect)) return false;
+
+        Array.Copy(_cur, _prev, _cur.Length);
+        Array.Clear(_cur, 0, _cur.Length);
+        _dirty = false;
+        return true;
     }
 
     // Полный перерендер: мгновенно очищаем экран, затем рисуем строками.

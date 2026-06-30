@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.63] — 2026-06-30
+- **fix** Мерцание ShowLog и DrawScroll — WriteConsoleOutput ([#25](https://github.com/iMironRU/Clinkon1C/issues/25)). `R.Flush()` теперь отправляет кадр через `kernel32!WriteConsoleOutput` — один системный вызов обновляет весь экран атомарно (FAR-стиль). Fallback на Console.Write если WCO недоступен. ShowLog и DrawScroll переведены на `R.Put()` + `R.Flush()`.
+
 ## [v1.2.62] — 2026-06-30
 - **fix** Мерцание ShowLog и DrawScroll — убраны лишние SetCursorPosition ([#23](https://github.com/iMironRU/Clinkon1C/issues/23)). ShowLog: 2 Pos() на кадр вместо ~80 — заголовок + строки идут последовательно без прыжков, скроллбар пишется сразу после контента (cursor уже там). DrawScroll: скроллбар инлайн после строки, отдельный цикл убран.
 

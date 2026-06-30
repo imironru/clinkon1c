@@ -87,13 +87,12 @@ internal static class ConsoleDialog
         int x      = (Console.WindowWidth  - w) / 2;
         int y      = 1;
         var raw    = text.Replace("\r", "").Split('\n');
-        var all    = WrapLines(raw, w - 4); // совпадает с contentW в DrawScrollBody
+        var all    = WrapLines(raw, w - 4);
         int scroll = 0;
 
-        DrawScrollFrame(x, y, w, h, title);
         while (true)
         {
-            DrawScrollBody(all, scroll, innerH, x, y, w, h, onSave != null, null);
+            RenderScroll(title, all, scroll, innerH, x, y, w, h, onSave != null, null);
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.F10) break;
             if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
@@ -116,21 +115,15 @@ internal static class ConsoleDialog
         int y      = 1;
         int scroll = 0;
         string[] all = Array.Empty<string>();
-        string prevTitle = "";
 
         while (true)
         {
             var (title, content) = getInfo();
             var raw = content.Replace("\r", "").Split('\n');
-            all = WrapLines(raw, w - 5);
+            all = WrapLines(raw, w - 4);
             scroll = Math.Min(scroll, Math.Max(0, all.Length - 1));
 
-            if (title != prevTitle)
-            {
-                DrawScrollFrame(x, y, w, h, title);
-                prevTitle = title;
-            }
-            DrawScrollBody(all, scroll, innerH, x, y, w, h, false, keyHint);
+            RenderScroll(title, all, scroll, innerH, x, y, w, h, false, keyHint);
             var k = Console.ReadKey(true);
 
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) break;
@@ -564,31 +557,28 @@ internal static class ConsoleDialog
 
     public static void ShowLog(Func<(string Lvl, string Txt)[]> getEntries)
     {
-        int w   = Console.WindowWidth;
-        int h   = Console.WindowHeight;
-        int vis = h - 2; // строки контента (строка 0 = шапка, h-1 = подвал)
-
-        var snap   = getEntries();
-        int scroll = Math.Max(0, snap.Length - vis);
-        Console.BackgroundColor = ConsoleColor.Black;
-        Console.CursorVisible   = false;
+        var snap = getEntries();
+        R.CheckResize();
+        int scroll = Math.Max(0, snap.Length - (R.H - 2));
 
         while (true)
         {
+            R.CheckResize();
+            int w   = R.W;
+            int h   = R.H;
+            int vis = h - 2;
+            scroll = Math.Min(scroll, Math.Max(0, snap.Length - vis));
+
             bool hasBar = snap.Length > vis;
             int  thumbY = hasBar
                 ? (int)(scroll * (double)(vis - 1) / Math.Max(1, snap.Length - vis))
                 : -1;
 
-            // Шапка — единственный Pos() в начале кадра, дальше курсор идёт
-            // последовательно без прыжков: каждая строка = w символов → авто-перенос
-            Pos(0, 0);
-            CC(ConsoleColor.Black, ConsoleColor.DarkGray);
-            Console.Write(R.Fit(
-                $" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 Обновить  Tab/Esc Закрыть", w));
+            // Всё через R.Put() — R.Flush() отправит за один WriteConsoleOutput
+            R.Put(0, 0,
+                R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 Обновить  Tab/Esc Закрыть", w),
+                ConsoleColor.Black, ConsoleColor.DarkGray);
 
-            // Контент (w-1) + скроллбар (1) = w символов → курсор переходит на
-            // следующую строку автоматически, без отдельного Pos()
             for (int i = 0; i < vis; i++)
             {
                 int li = scroll + i;
@@ -602,30 +592,28 @@ internal static class ConsoleDialog
                         "INF"  => ConsoleColor.Cyan,
                         _      => ConsoleColor.DarkGray,
                     };
-                    CC(fg, ConsoleColor.Black);
-                    Console.Write(R.Fit("  " + txt, w - 1));
+                    R.Put(0, i + 1, R.Fit("  " + txt, w - 1), fg, ConsoleColor.Black);
                 }
                 else
                 {
-                    CC(ConsoleColor.DarkGray, ConsoleColor.Black);
-                    Console.Write(new string(' ', w - 1));
+                    R.Put(0, i + 1, new string(' ', w - 1), ConsoleColor.DarkGray, ConsoleColor.Black);
                 }
-                // Скроллбар: cursor уже на (w-1, i+1) — пишем без Pos()
-                CC(ConsoleColor.DarkGray, ConsoleColor.Black);
-                Console.Write(hasBar ? (i == thumbY ? '█' : '░') : ' ');
+                R.Put(w - 1, i + 1,
+                    hasBar ? (i == thumbY ? "█" : "░") : " ",
+                    ConsoleColor.DarkGray, ConsoleColor.Black);
             }
 
-            // Подвал: диапазон слева, процент справа
-            int from = snap.Length == 0 ? 0 : scroll + 1;
-            int to   = Math.Min(snap.Length, scroll + vis);
-            int pct  = snap.Length <= vis ? 100
-                     : (int)(scroll * 100.0 / Math.Max(1, snap.Length - vis));
+            int from    = snap.Length == 0 ? 0 : scroll + 1;
+            int to      = Math.Min(snap.Length, scroll + vis);
+            int pct     = snap.Length <= vis ? 100
+                        : (int)(scroll * 100.0 / Math.Max(1, snap.Length - vis));
             var pctStr  = $" {pct}%";
             var leftStr = $" {from}–{to} из {snap.Length}";
-            Pos(0, h - 1);
-            CC(ConsoleColor.Black, ConsoleColor.DarkGray);
-            Console.Write(R.Fit(leftStr, w - pctStr.Length));
-            Console.Write(pctStr);
+            int ftrW    = w - pctStr.Length;
+            R.Put(0,    h - 1, R.Fit(leftStr, ftrW), ConsoleColor.Black, ConsoleColor.DarkGray);
+            R.Put(ftrW, h - 1, pctStr,                ConsoleColor.Black, ConsoleColor.DarkGray);
+
+            R.Flush();
 
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Tab || k.Key == ConsoleKey.Enter) break;
@@ -779,22 +767,21 @@ internal static class ConsoleDialog
         }
     }
 
-    // Рамка рисуется один раз до цикла
-    private static void DrawScrollFrame(int x, int y, int w, int h, string title)
-    {
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Top(x, y, w, title);
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-    }
-
-    // Только контент + скроллбар + подсказка — без перерисовки рамки.
-    // Скроллбар пишется сразу после строки контента: cursor уже на x+w-2 → нет Pos().
-    private static void DrawScrollBody(string[] lines, int scroll, int innerH,
+    // Рамка + контент + скроллбар + подсказка через R.Put() — R.Flush() в конце
+    // даёт один атомарный WriteConsoleOutput, без мерцания.
+    private static void RenderScroll(string title, string[] lines, int scroll, int innerH,
         int x, int y, int w, int h, bool hasSave, string? overrideHint)
     {
-        // contentW=w-4: текст x+2..x+w-3, cursor после записи = x+w-2 (позиция скроллбара)
-        int contentW = w - 4;
+        // Рамка
+        var t   = "══ " + title + " ";
+        int rem = Math.Max(0, w - 2 - t.Length);
+        R.Put(x, y, R.Fit("╔" + t + new string('═', rem) + "╗", w), ConsoleColor.White, ConsoleColor.DarkBlue);
+        for (int i = 1; i < h - 1; i++)
+            R.Put(x, y + i, "║" + new string(' ', w - 2) + "║", ConsoleColor.White, ConsoleColor.DarkBlue);
+        R.Put(x, y + h - 1, "╚" + new string('═', w - 2) + "╝", ConsoleColor.White, ConsoleColor.DarkBlue);
+
+        // Контент + скроллбар
+        int contentW = w - 4; // x+2..x+w-3; скроллбар на x+w-2
         bool hasBar  = lines.Length > innerH;
         int  thumbY  = hasBar
             ? (int)(scroll * (double)(innerH - 1) / Math.Max(1, lines.Length - innerH))
@@ -803,26 +790,25 @@ internal static class ConsoleDialog
         for (int i = 0; i < innerH; i++)
         {
             int li = scroll + i;
-            Pos(x + 2, y + 2 + i);
-            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-            Console.Write(R.Fit(li < lines.Length ? lines[li] : "", contentW));
-            // Cursor на x+w-2 — скроллбар без Pos()
-            CC(ConsoleColor.DarkGray, ConsoleColor.DarkBlue);
-            Console.Write(hasBar ? (i == thumbY ? '█' : '░') : ' ');
+            R.Put(x + 2, y + 2 + i,
+                R.Fit(li < lines.Length ? lines[li] : "", contentW),
+                ConsoleColor.White, ConsoleColor.DarkBlue);
+            R.Put(x + w - 2, y + 2 + i,
+                hasBar ? (i == thumbY ? "█" : "░") : " ",
+                ConsoleColor.DarkGray, ConsoleColor.DarkBlue);
         }
 
         // Подсказка + процент
-        int pct = lines.Length <= innerH ? 100
-                : (int)(scroll * 100.0 / Math.Max(1, lines.Length - innerH));
+        int pct    = lines.Length <= innerH ? 100
+                   : (int)(scroll * 100.0 / Math.Max(1, lines.Length - innerH));
         var pctStr = $" {pct}%";
         var hint   = overrideHint ?? (hasSave
             ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
             : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть");
+        int hintW  = w - 4 - pctStr.Length;
+        R.Put(x + 2,         y + h - 2, R.Fit(hint, hintW), ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        R.Put(x + 2 + hintW, y + h - 2, pctStr,              ConsoleColor.White,  ConsoleColor.DarkBlue);
 
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        Pos(x + 2, y + h - 2);
-        Console.Write(R.Fit(hint, w - 4 - pctStr.Length));
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Console.Write(pctStr);
+        R.Flush();
     }
 }
