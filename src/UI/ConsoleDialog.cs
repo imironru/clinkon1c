@@ -408,6 +408,47 @@ internal static class ConsoleDialog
         return result;
     }
 
+    // ── Компактный инфо-диалог с кнопками ────────────────────────────────────
+    // Возвращает индекс кнопки (0..N-1) или -1 (Esc/F10)
+    public static int ShowInfo(string title, string[] lines, params string[] buttons)
+    {
+        int w   = Math.Min(Console.WindowWidth - 4, 76);
+        int h   = lines.Length + 5; // border×2 + empty + lines + empty + buttons
+        h       = Math.Min(h, Console.WindowHeight - 2);
+        int x   = (Console.WindowWidth  - w) / 2;
+        int y   = (Console.WindowHeight - h) / 2;
+        int sel = buttons.Length - 1; // по умолчанию последняя кнопка (Закрыть)
+
+        while (true)
+        {
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, title);
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            for (int i = 0; i < lines.Length && y + 2 + i < y + h - 3; i++)
+            {
+                CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+                Pos(x + 2, y + 2 + i);
+                Console.Write(R.Fit(lines[i], w - 4));
+            }
+
+            if (buttons.Length > 0)
+                DrawBtns(x, y + h - 2, w, sel, buttons);
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
+                { R.Invalidate(); return -1; }
+            if (k.Key == ConsoleKey.Enter)
+                { R.Invalidate(); return sel; }
+            bool shiftTab = k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Shift) != 0;
+            if (k.Key == ConsoleKey.LeftArrow || shiftTab)
+                sel = (sel - 1 + buttons.Length) % buttons.Length;
+            else if (k.Key == ConsoleKey.RightArrow || k.Key == ConsoleKey.Tab)
+                sel = (sel + 1) % buttons.Length;
+        }
+    }
+
     // ── Стартовые диалоги ────────────────────────────────────────────────────
 
     public static bool ShowWarningDialog()
