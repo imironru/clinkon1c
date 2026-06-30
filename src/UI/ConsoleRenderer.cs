@@ -96,20 +96,25 @@ internal static class R
         Array.Clear(_cur, 0, _cur.Length);
     }
 
-    // ── WriteConsoleOutput — атомарная запись прямоугольника ────────────────────
+    // ── WriteConsoleOutput — атомарная запись (только классический ConHost) ─────
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool WriteConsoleOutput(
         IntPtr hConsoleOutput,
-        [MarshalAs(UnmanagedType.LPArray), In] CHAR_INFO[] lpBuffer,
+        [In] CHAR_INFO[] lpBuffer,
         COORD dwBufferSize, COORD dwBufferCoord,
         ref SMALL_RECT lpWriteRegion);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetStdHandle(int nStdHandle);
 
+    [DllImport("kernel32.dll")]
+    private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    // ushort вместо char — обходим маршалинг P/Invoke char-поля;
+    // WriteConsoleOutputW принимает WCHAR (2 байта) — именно ushort.
     [StructLayout(LayoutKind.Explicit)]
-    private struct CHAR_INFO { [FieldOffset(0)] public char Char; [FieldOffset(2)] public short Attributes; }
+    private struct CHAR_INFO { [FieldOffset(0)] public ushort Char; [FieldOffset(2)] public short Attributes; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct COORD { public short X, Y; }
@@ -118,24 +123,36 @@ internal static class R
     private struct SMALL_RECT { public short Left, Top, Right, Bottom; }
 
     private const  int    STD_OUTPUT_HANDLE = -11;
-    private static IntPtr _hOut = IntPtr.Zero;
+    private const  uint   ENABLE_VT_PROCESSING = 0x0004;
+    private static IntPtr _hOut   = IntPtr.Zero;
+    private static bool?  _useWco;  // null = ещё не определено
 
     private static bool TryFlushWco()
     {
         if (_hOut == IntPtr.Zero) _hOut = GetStdHandle(STD_OUTPUT_HANDLE);
         if (_hOut == new IntPtr(-1)) return false;
 
+        // Определяем тип терминала один раз:
+        // VT включён (Windows Terminal, ConEmu) → Console.Write батчится на 60fps, WCO ломает Unicode в ConPTY.
+        // VT выключен (классический ConHost)    → WCO даёт атомарный апдейт без мерцания.
+        if (_useWco == null)
+        {
+            GetConsoleMode(_hOut, out uint mode);
+            _useWco = (mode & ENABLE_VT_PROCESSING) == 0;
+        }
+        if (!_useWco.Value) return false;
+
         var ci = new CHAR_INFO[_w * _h];
         for (int i = 0; i < _cur.Length && i < ci.Length; i++)
         {
             ref Cell c = ref _cur[i];
-            ci[i].Char       = c.Ch == '\0' ? ' ' : c.Ch;
+            ci[i].Char       = c.Ch == '\0' ? (ushort)' ' : (ushort)c.Ch;
             ci[i].Attributes = (short)((int)c.Bg << 4 | (int)c.Fg);
         }
         var size   = new COORD    { X = (short)_w, Y = (short)_h };
         var origin = new COORD    { X = 0, Y = 0 };
         var rect   = new SMALL_RECT { Left = 0, Top = 0, Right = (short)(_w - 1), Bottom = (short)(_h - 1) };
-        if (!WriteConsoleOutput(_hOut, ci, size, origin, ref rect)) return false;
+        if (!WriteConsoleOutput(_hOut, ci, size, origin, ref rect)) { _useWco = false; return false; }
 
         Array.Copy(_cur, _prev, _cur.Length);
         Array.Clear(_cur, 0, _cur.Length);
@@ -143,15 +160,11 @@ internal static class R
         return true;
     }
 
-    // Полный перерендер: мгновенно очищаем экран, затем рисуем строками.
-    // Число вызовов Console.Write = число цветовых сегментов (не символов).
+    // Полный перерендер: рисуем строками по цветовым сегментам.
+    // Console.Clear() убран — он вызывал мигание при выходе из диалогов;
+    // FlushFull и так записывает все ячейки, пустые ('\0') — фоновым пробелом.
     private static void FlushFull()
     {
-        // Мгновенно закрашиваем диалог (или любой другой контент) в цвет фона.
-        Console.BackgroundColor = PanelBg;
-        Console.ForegroundColor = PanelFg;
-        Console.Clear();
-
         var sb = new StringBuilder(_w);
 
         for (int y = 0; y < _h; y++)
@@ -167,10 +180,12 @@ internal static class R
             {
                 int i = off + x;
                 ref Cell c = ref _cur[i];
-                char ch = c.Ch == '\0' ? ' ' : c.Ch;
+                // '\0' — ячейка не заполнена; рендерим как фоновый пробел
+                char         ch  = c.Ch == '\0' ? ' '     : c.Ch;
+                ConsoleColor cfg = c.Ch == '\0' ? PanelFg : c.Fg;
+                ConsoleColor cbg = c.Ch == '\0' ? PanelBg : c.Bg;
 
-                // Новый цветовой сегмент — сбрасываем накопленное
-                if (c.Fg != runFg || c.Bg != runBg)
+                if (cfg != runFg || cbg != runBg)
                 {
                     if (sb.Length > 0)
                     {
@@ -179,12 +194,12 @@ internal static class R
                         Console.Write(sb.ToString());
                         sb.Clear();
                     }
-                    runFg = c.Fg;
-                    runBg = c.Bg;
+                    runFg = cfg;
+                    runBg = cbg;
                 }
 
                 sb.Append(ch);
-                _prev[i] = c; // синхронизируем prev
+                _prev[i] = c;
             }
 
             if (sb.Length > 0)

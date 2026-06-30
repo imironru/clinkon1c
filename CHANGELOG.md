@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.65] — 2026-06-30
+- **fix** WCO ломает Unicode в Windows Terminal ([#26](https://github.com/iMironRU/Clinkon1C/issues/26)). `TryFlushWco` теперь проверяет `ENABLE_VIRTUAL_TERMINAL_PROCESSING` через `GetConsoleMode`: VT включён (WT, ConEmu) → Console.Write (WT батчит кадры на 60fps, мерцания нет); VT выключен (классический ConHost) → WriteConsoleOutput атомарно. `ushort` вместо `char` в CHAR_INFO — обходит P/Invoke char-маршалинг. `Console.Clear()` убран из FlushFull — вспышка при выходе из диалогов исчезла; пустые ячейки рендерятся PanelBg-пробелом.
+
 ## [v1.2.64] — 2026-06-30
 - **fix** Кракозябры после WriteConsoleOutput ([#23](https://github.com/iMironRU/Clinkon1C/issues/23)). CharSet.Unicode в DllImport → резолвится в WriteConsoleOutputW вместо WriteConsoleOutputA; ANSI-версия читала только первый байт char, теряя верхний байт Юникода.
 
