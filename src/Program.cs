@@ -81,6 +81,7 @@ class Program
             return;
         }
 
+        Console.Title = $"Clinkon1C v{VERSION}";
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 #if !NETFRAMEWORK
         // В .NET 8+ CP1251 недоступен без явной регистрации; в net48 встроен
