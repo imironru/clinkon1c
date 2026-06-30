@@ -1,5 +1,8 @@
 # Changelog
 
+## [v1.2.66] — 2026-06-30
+- **feat** Веб-публикации — анонимный доступ `[A]` ([#28](https://github.com/iMironRU/Clinkon1C/issues/28)). Новый метод `DoWebAnon`: форма «Включить/выключен + Пользователь + Пароль» с пре-заполнением текущих значений. Доступен: из списка публикаций `[A]`, из экрана информации `[A]`. После сохранения предлагает перезапуск Apache. `[A]` добавлен в кейбар, строку статуса и подсказку в DoWebInfo.
+
 ## [v1.2.65] — 2026-06-30
 - **fix** WCO ломает Unicode в Windows Terminal ([#26](https://github.com/iMironRU/Clinkon1C/issues/26)). `TryFlushWco` теперь проверяет `ENABLE_VIRTUAL_TERMINAL_PROCESSING` через `GetConsoleMode`: VT включён (WT, ConEmu) → Console.Write (WT батчит кадры на 60fps, мерцания нет); VT выключен (классический ConHost) → WriteConsoleOutput атомарно. `ushort` вместо `char` в CHAR_INFO — обходит P/Invoke char-маршалинг. `Console.Clear()` убран из FlushFull — вспышка при выходе из диалогов исчезла; пустые ячейки рендерятся PanelBg-пробелом.
 

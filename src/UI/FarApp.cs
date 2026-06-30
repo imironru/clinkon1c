@@ -1438,6 +1438,7 @@ public class FarApp
                 else if (kind2 == NavLevelKind.WebRoot)
                 {
                     if      (ch == 'p') DoWebPublish();
+                    else if (ch == 'a') DoWebAnon(CurrentItem()?.BaseName);
                     else if (ch == 'e') DoWebEdit(CurrentItem()?.BaseName);
                     else if (ch == 'j') DoWebJwt(CurrentItem()?.BaseName);
                     else if (ch == 's') DoWebApacheOp("start");
@@ -2289,13 +2290,14 @@ public class FarApp
 
         ConsoleDialog.ShowTextWithKeys(
             GetInfo,
-            "[E] Редактировать  [J] JWT  [S] Старт  [T] Стоп  [R] Рестарт  Esc — закрыть",
+            "[A] Анон. вход  [E] Редактировать  [J] JWT  [S] Старт  [T] Стоп  [R] Рестарт  Esc — закрыть",
             (key, _) =>
             {
                 char ch = char.ToLower((char)key);
                 if (ch == 's') { DoWebApacheOp("start");   return true; }
                 if (ch == 't') { DoWebApacheOp("stop");    return true; }
                 if (ch == 'r') { DoWebApacheOp("restart"); return true; }
+                if (ch == 'a') { DoWebAnon(alias);         return false; }
                 if (ch == 'e') { DoWebEdit(alias);         return false; }
                 if (ch == 'j') { DoWebJwt(alias);          return false; }
                 return true;
@@ -2466,6 +2468,59 @@ public class FarApp
 
         bool restart = ConsoleDialog.Confirm("Сохранено",
             $"{e.Alias} обновлена.\n\nПерезапустить Apache сейчас?");
+        R.Invalidate();
+        if (restart) DoWebApacheOp("restart");
+
+        ConsoleDialog.ShowProgress("Обновление...", _ => _web.Refresh());
+        R.Invalidate();
+        RebuildCurrentLevel();
+    }
+
+    private void DoWebAnon(string? alias)
+    {
+        if (string.IsNullOrEmpty(alias)) return;
+        var e = _web.Entries.FirstOrDefault(x => x.Alias == alias);
+        if (e == null) return;
+
+        bool wasEnabled = !string.IsNullOrEmpty(e.AnonUser);
+        string header   = wasEnabled
+            ? $"Анон. вход: ВКЛЮЧЁН ({e.AnonUser})"
+            : "Анон. вход: выключен";
+
+        var defaults = new Dictionary<string, string>
+        {
+            ["on"]   = wasEnabled ? "да" : "нет",
+            ["user"] = e.AnonUser,
+            ["pwd"]  = e.AnonPwd,
+        };
+
+        var vals = ConsoleDialog.Form(
+            $"{header}  •  {e.Alias}",
+            new (string, string)[]
+            {
+                ("on",   "Включить (да/нет)"),
+                ("user", "Пользователь 1С (для авто-входа)"),
+                ("pwd",  "Пароль"),
+            }, defaults);
+        R.Invalidate();
+        if (vals == null) return;
+
+        bool enable   = IsYes(vals["on"]);
+        string? user  = enable && !string.IsNullOrWhiteSpace(vals["user"]) ? vals["user"].Trim() : null;
+        string? pwd   = enable && !string.IsNullOrWhiteSpace(vals["pwd"])  ? vals["pwd"].Trim()  : null;
+
+        string? err = null;
+        ConsoleDialog.ShowProgress("Сохранение VRD...", _ =>
+            err = _web.UpdateVrd(e, user, pwd, e.DebugEnabled, e.DebugProtocol, e.DebugUrl, e.JwtBlockXml));
+        R.Invalidate();
+
+        if (err != null) { ConsoleDialog.ShowOk("Ошибка", err); R.Invalidate(); return; }
+
+        var status = enable
+            ? (user != null ? $"включён (пользователь: {user})" : "включён без авто-входа")
+            : "отключён";
+        bool restart = ConsoleDialog.Confirm("Сохранено",
+            $"{e.Alias}: анонимный вход {status}.\n\nПерезапустить Apache сейчас?");
         R.Invalidate();
         if (restart) DoWebApacheOp("restart");
 
@@ -3882,7 +3937,7 @@ public class FarApp
         {
             var apacheSt = !_web.ApacheFound ? "не найден"
                 : (_web.ApacheRunning ? "▶ Работает" : "■ Остановлен");
-            var webInfo  = $"  {_web.Entries.Count} публик.  │  Apache: {apacheSt}  │  [Enter] Инфо  [E] Редакт.  [J] JWT  [P] Публик.  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить";
+            var webInfo  = $"  {_web.Entries.Count} публик.  │  Apache: {apacheSt}  │  [Enter] Инфо  [A] Анон.  [E] Редакт.  [J] JWT  [P] Публик.  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт  [F5] Обновить";
             R.BoxRow(InfoRow, webInfo, R.HdrFg, R.HdrBg);
             return;
         }
@@ -3951,7 +4006,7 @@ public class FarApp
             NavLevelKind.LicensesRoot  => "[Enter] Инфо  [A] Активация  [V] Проверить",
             NavLevelKind.AgentsRoot    => "[Enter] Инфо  [S] Старт  [T] Стоп  [R] Рестарт  [D] Отладка  [N] Новый",
             NavLevelKind.ProcessesRoot => "[Enter] Инфо  [K]/[F8] Завершить  [A] Завершить все",
-            NavLevelKind.WebRoot       => "[Enter] Инфо  [E] Редакт.  [J] JWT  [P] Публик.  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт",
+            NavLevelKind.WebRoot       => "[Enter] Инфо  [A] Анон.  [E] Редакт.  [J] JWT  [P] Публик.  [F8] Снять  [S] Старт  [T] Стоп  [R] Рестарт",
             NavLevelKind.EmulatorsRoot => "[Enter] Детали  [D] Удалить",
             NavLevelKind.ConfigsRoot   => "[Enter] Редактировать",
             NavLevelKind.ComRoot       => "[Enter] Инфо/Рег.  [E] ProgID",
