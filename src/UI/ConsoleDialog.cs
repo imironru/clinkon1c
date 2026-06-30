@@ -8,24 +8,25 @@ internal static class ConsoleDialog
 {
     // ── Confirm Y/N с навигацией кнопок ─────────────────────────────────────
     // defaultYes=false → курсор на «Нет» (безопаснее для деструктивных операций)
-    public static bool Confirm(string title, string message, bool defaultYes = false)
+    // yesLabel/noLabel — опциональные метки кнопок (по умолчанию «Да»/«Нет»)
+    public static bool Confirm(string title, string message, bool defaultYes = false,
+        string yesLabel = "  Да  ", string noLabel = "  Нет  ")
     {
         var msgLines = message.Split('\n');
-        int w  = Math.Min(Console.WindowWidth - 4, 72);
-        int h  = Math.Min(msgLines.Length + 5, Console.WindowHeight - 2);
-        int x  = (Console.WindowWidth  - w) / 2;
-        int y  = (Console.WindowHeight - h) / 2;
+        int w   = Math.Min(Console.WindowWidth - 4, 72);
+        int h   = Math.Min(msgLines.Length + 5, Console.WindowHeight - 2);
+        int x   = (Console.WindowWidth  - w) / 2;
+        int y   = (Console.WindowHeight - h) / 2;
         int sel = defaultYes ? 0 : 1; // 0 = Да, 1 = Нет
+        var labels = new[] { yesLabel, noLabel };
 
         while (true)
         {
-            // Рамка
             CC(ConsoleColor.White, ConsoleColor.DarkBlue);
             Top(x, y, w, title);
             for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
             Bot(x, y + h - 1, w);
 
-            // Текст сообщения
             for (int i = 0; i < msgLines.Length && y + 2 + i < y + h - 3; i++)
             {
                 CC(ConsoleColor.White, ConsoleColor.DarkBlue);
@@ -33,23 +34,7 @@ internal static class ConsoleDialog
                 Console.Write(R.Fit(msgLines[i], w - 4));
             }
 
-            // Кнопки
-            const string BYes = "  Да  ";
-            const string BNo  = "  Нет  ";
-            const int Gap = 4;
-            int btnX = x + (w - BYes.Length - Gap - BNo.Length) / 2;
-            int btnY = y + h - 2;
-
-            CC(sel == 0 ? ConsoleColor.Black : ConsoleColor.Yellow,
-               sel == 0 ? ConsoleColor.Cyan  : ConsoleColor.DarkBlue);
-            Pos(btnX, btnY); Console.Write(BYes);
-
-            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-            Pos(btnX + BYes.Length, btnY); Console.Write(new string(' ', Gap));
-
-            CC(sel == 1 ? ConsoleColor.Black : ConsoleColor.Yellow,
-               sel == 1 ? ConsoleColor.Cyan  : ConsoleColor.DarkBlue);
-            Pos(btnX + BYes.Length + Gap, btnY); Console.Write(BNo);
+            DrawBtns(x, y + h - 2, w, sel, labels);
 
             var k = Console.ReadKey(true);
 
@@ -59,12 +44,9 @@ internal static class ConsoleDialog
             if (k.Key == ConsoleKey.N || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)
                 { R.Invalidate(); return false; }
 
-            // Навигация
-            if (k.Key == ConsoleKey.LeftArrow  || k.Key == ConsoleKey.RightArrow
-                || k.Key == ConsoleKey.Tab)
+            if (k.Key == ConsoleKey.LeftArrow || k.Key == ConsoleKey.RightArrow || k.Key == ConsoleKey.Tab)
                 sel = 1 - sel;
 
-            // Подтверждение
             if (k.Key == ConsoleKey.Enter)
                 { R.Invalidate(); return sel == 0; }
         }
@@ -433,44 +415,14 @@ internal static class ConsoleDialog
         Console.CursorVisible = false;
         Console.BackgroundColor = ConsoleColor.DarkBlue;
         Console.Clear();
-
-        var lines = new[]
-        {
-            "",
-            "  Данная утилита предназначена только для администраторов 1С.",
-            "  Она удаляет кэш, шаблоны и служебные файлы платформы.",
-            "",
-            "  Неправильное использование может привести к потере данных.",
-            ""
-        };
-
-        int w = Math.Min(Console.WindowWidth - 4, 68);
-        int h = lines.Length + 5;
-        int x = (Console.WindowWidth  - w) / 2;
-        int y = (Console.WindowHeight - h) / 2;
-
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Top(x, y, w, "Clinkon1C — Предупреждение");
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-
-        for (int i = 0; i < lines.Length; i++)
-        {
-            Pos(x + 2, y + 2 + i);
-            Console.Write(R.Fit(lines[i], w - 4));
-        }
-
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        var btns = "[ Y ]  Да, я администратор — продолжить      [ N ]  Выход";
-        Pos(x + Math.Max(0, (w - btns.Length) / 2), y + h - 2);
-        Console.Write(btns);
-
-        while (true)
-        {
-            var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Y) return true;
-            if (k.Key == ConsoleKey.N || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
-        }
+        return Confirm(
+            "Clinkon1C — Предупреждение",
+            "\nДанная утилита предназначена только для администраторов 1С.\n" +
+            "Она удаляет кэш, шаблоны и служебные файлы платформы.\n\n" +
+            "Неправильное использование может привести к потере данных.\n",
+            defaultYes: false,
+            "  Да, я понимаю  ",
+            "  Выход  ");
     }
 
     public static ElevationChoice ShowElevationMenu()
@@ -479,35 +431,37 @@ internal static class ConsoleDialog
         Console.BackgroundColor = ConsoleColor.DarkBlue;
         Console.Clear();
 
-        int w = Math.Min(Console.WindowWidth - 4, 66);
-        int h = 11;
+        int w = Math.Min(Console.WindowWidth - 4, 68);
+        int h = 9;
         int x = (Console.WindowWidth  - w) / 2;
         int y = (Console.WindowHeight - h) / 2;
-
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Top(x, y, w, "Clinkon1C — Права администратора");
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-
-        Pos(x + 2, y + 2); Console.Write(R.Fit("  Утилита запущена без прав администратора.", w - 4));
-        Pos(x + 2, y + 3); Console.Write(R.Fit("  Часть профилей пользователей будет недоступна.", w - 4));
-
-        var opt1 = "  [ 1 ]  Перезапустить от имени администратора";
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        Pos(x + 2, y + 5); Console.Write(opt1);
-        CC(ConsoleColor.Cyan, ConsoleColor.DarkBlue);
-        Pos(x + 2 + opt1.Length, y + 5); Console.Write("  ← рекомендуется");
-
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        Pos(x + 2, y + 7); Console.Write(R.Fit("  [ 2 ]  Продолжить без повышения прав", w - 4));
-        Pos(x + 2, y + 8); Console.Write(R.Fit("  [ 3 ]  Выход", w - 4));
+        int sel = 0; // 0=Повысить, 1=Продолжить, 2=Выход
+        var labels = new[] { "  Повысить права  ", "  Продолжить  ", "  Выход  " };
 
         while (true)
         {
+            CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+            Top(x, y, w, "Clinkon1C — Права администратора");
+            for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+            Bot(x, y + h - 1, w);
+
+            Pos(x + 2, y + 2); Console.Write(R.Fit("  Утилита запущена без прав администратора.", w - 4));
+            Pos(x + 2, y + 3); Console.Write(R.Fit("  Часть профилей пользователей будет недоступна.", w - 4));
+            CC(ConsoleColor.Cyan, ConsoleColor.DarkBlue);
+            Pos(x + 2, y + 4); Console.Write(R.Fit("  Рекомендуется повысить права.", w - 4));
+
+            DrawBtns(x, y + h - 2, w, sel, labels);
+
             var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.D1 || k.KeyChar == '1') return ElevationChoice.Elevate;
-            if (k.Key == ConsoleKey.D2 || k.KeyChar == '2') return ElevationChoice.Continue;
-            if (k.Key == ConsoleKey.D3 || k.KeyChar == '3' || k.Key == ConsoleKey.Escape) return ElevationChoice.Exit;
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return ElevationChoice.Exit;
+            if (k.Key == ConsoleKey.Enter) return sel == 0 ? ElevationChoice.Elevate
+                                                : sel == 1 ? ElevationChoice.Continue
+                                                :             ElevationChoice.Exit;
+            bool shiftTab = k.Key == ConsoleKey.Tab && (k.Modifiers & ConsoleModifiers.Shift) != 0;
+            if (k.Key == ConsoleKey.LeftArrow || shiftTab)
+                sel = (sel - 1 + labels.Length) % labels.Length;
+            else if (k.Key == ConsoleKey.RightArrow || k.Key == ConsoleKey.Tab)
+                sel = (sel + 1) % labels.Length;
         }
     }
 
@@ -516,62 +470,30 @@ internal static class ConsoleDialog
         Console.CursorVisible = false;
         Console.BackgroundColor = ConsoleColor.DarkBlue;
         Console.Clear();
-
-        int w = Math.Min(Console.WindowWidth - 4, 66);
-        int h = 10;
-        int x = (Console.WindowWidth  - w) / 2;
-        int y = (Console.WindowHeight - h) / 2;
-
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
-        Top(x, y, w, "Clinkon1C — Доступно обновление");
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-
-        Pos(x + 2, y + 2); Console.Write(R.Fit($"  Текущая версия: {currentVer}", w - 4));
-        Pos(x + 2, y + 3); Console.Write(R.Fit($"  Новая версия:   v{newVer}", w - 4));
-        Pos(x + 2, y + 5); Console.Write(R.Fit("  Скачать и заменить текущий файл автоматически?", w - 4));
-
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        var btns = "[ Y ]  Да, обновить сейчас      [ N ]  Позже";
-        Pos(x + Math.Max(0, (w - btns.Length) / 2), y + h - 2);
-        Console.Write(btns);
-
-        while (true)
-        {
-            var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Y) return true;
-            if (k.Key == ConsoleKey.N || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
-        }
+        return Confirm(
+            "Clinkon1C — Доступно обновление",
+            $"\nТекущая версия: {currentVer}\nНовая версия:   v{newVer}\n\n" +
+            "Скачать и заменить текущий файл автоматически?\n",
+            defaultYes: false,
+            "  Обновить сейчас  ",
+            "  Позже  ");
     }
 
     // ── .NET Framework check (net48-only) ────────────────────────────────────
 
     public static bool ShowDotNetRequiredDialog()
     {
-        int w = Math.Min(Console.WindowWidth - 4, 66);
-        int h = 9;
-        int x = (Console.WindowWidth  - w) / 2;
-        int y = (Console.WindowHeight - h) / 2;
-
-        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Console.CursorVisible = false;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
         Console.Clear();
-        Top(x, y, w, "Clinkon1C — Требуется .NET Framework 4.8");
-        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
-        Bot(x, y + h - 1, w);
-
-        Pos(x + 2, y + 2); Console.Write(R.Fit("  Для работы утилиты необходим Microsoft .NET Framework 4.8.", w - 4));
-        Pos(x + 2, y + 3); Console.Write(R.Fit("  Он не обнаружен на этом компьютере.", w - 4));
-
-        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
-        Pos(x + 2, y + 5); Console.Write(R.Fit("  [ 1 ]  Открыть страницу загрузки на сайте Microsoft", w - 4));
-        Pos(x + 2, y + 6); Console.Write(R.Fit("  [ 2 ]  Выход", w - 4));
-
-        while (true)
-        {
-            var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.D1 || k.KeyChar == '1') return true;
-            if (k.Key == ConsoleKey.D2 || k.KeyChar == '2' || k.Key == ConsoleKey.Escape) return false;
-        }
+        return Confirm(
+            "Clinkon1C — Требуется .NET Framework 4.8",
+            "\nДля работы утилиты необходим Microsoft .NET Framework 4.8.\n" +
+            "Он не обнаружен на этом компьютере.\n\n" +
+            "Открыть страницу загрузки на сайте Microsoft?\n",
+            defaultYes: true,
+            "  Открыть сайт  ",
+            "  Выход  ");
     }
 
     // ── Лог операций (полноэкранный, Tab) ────────────────────────────────────
@@ -706,6 +628,28 @@ internal static class ConsoleDialog
     }
 
     // ── Примитивы (прямой вывод в Console) ───────────────────────────────────
+    // Рисует N кнопок горизонтально по центру (x..x+w), активная — Black/Cyan
+    private static void DrawBtns(int x, int y, int w, int sel, string[] labels)
+    {
+        const int Gap = 3;
+        int total = Gap * (labels.Length - 1);
+        foreach (var l in labels) total += l.Length;
+        int bx = x + Math.Max(0, (w - total) / 2);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            CC(sel == i ? ConsoleColor.Black : ConsoleColor.Yellow,
+               sel == i ? ConsoleColor.Cyan  : ConsoleColor.DarkBlue);
+            Pos(bx, y); Console.Write(labels[i]);
+            bx += labels[i].Length;
+            if (i < labels.Length - 1)
+            {
+                CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+                Pos(bx, y); Console.Write(new string(' ', Gap));
+                bx += Gap;
+            }
+        }
+    }
+
     private static void CC(ConsoleColor fg, ConsoleColor bg)
     { Console.ForegroundColor = fg; Console.BackgroundColor = bg; }
 
