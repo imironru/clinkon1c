@@ -52,18 +52,7 @@ class Program
         }
         catch { }
 
-        Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-        Console.WriteLine("║  Требуется .NET Framework 4.8                                ║");
-        Console.WriteLine("║                                                              ║");
-        Console.WriteLine("║  Для работы утилиты необходим Microsoft .NET Framework 4.8. ║");
-        Console.WriteLine("║  Он не обнаружен на этом компьютере.                         ║");
-        Console.WriteLine("║                                                              ║");
-        Console.WriteLine("║  [1] Открыть страницу загрузки на сайте Microsoft            ║");
-        Console.WriteLine("║  [2] Выход                                                   ║");
-        Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
-        Console.Write("Ваш выбор: ");
-        var choice = Console.ReadLine();
-        if (choice?.Trim() == "1")
+        if (ConsoleDialog.ShowDotNetRequiredDialog())
         {
             try
             {
@@ -105,12 +94,31 @@ class Program
         if (!isAdmin)
         {
             Logger.Warn("Запущен без прав администратора");
-            if (!ShowElevationMenu()) return;
+            var choice = ConsoleDialog.ShowElevationMenu();
+            if (choice == ElevationChoice.Elevate)
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName        = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName,
+                        Verb            = "runas",
+                        UseShellExecute = true
+                    });
+                }
+                catch (Exception ex)
+                {
+                    ConsoleDialog.Confirm("Ошибка", $"Не удалось запустить с повышением прав:\n{ex.Message}");
+                }
+                return;
+            }
+            if (choice == ElevationChoice.Exit) return;
+            Logger.Warn("Продолжение без прав администратора");
         }
 
         // 2. После прав — предупреждение в FAR-стиле (пропускается при авто-обновлении)
         bool skipWarning = Array.IndexOf(args, "--skip-admin-warning") >= 0;
-        if (!skipWarning && !ShowWarningDialog()) return;
+        if (!skipWarning && !ConsoleDialog.ShowWarningDialog()) return;
 
         // 3. Проверка обновлений — интерактивная, предлагаем обновиться
         string? updateNotice = null;
@@ -120,7 +128,7 @@ class Program
             if (upd != null)
             {
                 updateNotice = $"v{upd.Version}";
-                if (ShowUpdateDialog(upd))
+                if (ConsoleDialog.ShowUpdateDialog(FullVersion, upd.Version))
                 {
                     SelfUpdate(upd);
                     return; // SelfUpdate запускает новый процесс и вызывает Environment.Exit(0)
@@ -155,159 +163,6 @@ class Program
         finally
         {
             Logger.Info("Clinkon1C завершён");
-        }
-    }
-
-    // ── Диалоги запуска ──────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Запрос повышения прав (plain-text, до инициализации UI).
-    /// Возвращает true если нужно продолжать без повышения,
-    /// false если пользователь вышел.
-    /// </summary>
-    private static bool ShowElevationMenu()
-    {
-        Console.CursorVisible = false;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Clear();
-
-        int W = Console.WindowWidth;
-        int H = Console.WindowHeight;
-        int w = Math.Min(W - 4, 66);
-        int h = 11;
-        int x = (W - w) / 2;
-        int y = (H - h) / 2;
-
-        void At(int cx, int cy) { try { Console.SetCursorPosition(cx, cy); } catch { } }
-
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        At(x, y);
-        var tt = "══ Clinkon1C — Права администратора ";
-        Console.Write("╔" + tt + new string('═', w - 2 - tt.Length) + "╗");
-        for (int i = 1; i < h - 1; i++) { At(x, y + i); Console.Write("║" + new string(' ', w - 2) + "║"); }
-        At(x, y + h - 1);
-        Console.Write("╚" + new string('═', w - 2) + "╝");
-
-        At(x + 2, y + 2);
-        Console.Write("  Утилита запущена без прав администратора.");
-        At(x + 2, y + 3);
-        Console.Write("  Часть профилей пользователей будет недоступна.");
-
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        At(x + 2, y + 5);
-        Console.Write("  [ 1 ]  Перезапустить от имени администратора");
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        At(x + 9 + 38, y + 5);
-        Console.Write("  ← рекомендуется");
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        At(x + 2, y + 7);
-        Console.Write("  [ 2 ]  Продолжить без повышения прав");
-        At(x + 2, y + 8);
-        Console.Write("  [ 3 ]  Выход");
-
-        Console.CursorVisible = false;
-
-        while (true)
-        {
-            var k = Console.ReadKey(intercept: true);
-            if (k.Key == ConsoleKey.D1 || k.KeyChar == '1')
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName        = System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName,
-                        Verb            = "runas",
-                        UseShellExecute = true
-                    });
-                }
-                catch (Exception ex)
-                {
-                    Console.CursorVisible = true;
-                    Console.BackgroundColor = ConsoleColor.Black;
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.Clear();
-                    Console.WriteLine($"Не удалось запустить с повышением прав: {ex.Message}");
-                    Console.ReadKey(true);
-                }
-                return false;
-            }
-            if (k.Key == ConsoleKey.D2 || k.KeyChar == '2')
-            {
-                Logger.Warn("Продолжение без прав администратора");
-                return true;
-            }
-            if (k.Key == ConsoleKey.D3 || k.KeyChar == '3' || k.Key == ConsoleKey.Escape)
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// Предупреждение об утилите — FAR-стиль, по центру синего экрана.
-    /// Возвращает true если пользователь нажал Y.
-    /// </summary>
-    private static bool ShowWarningDialog()
-    {
-        Console.CursorVisible = false;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Clear();
-
-        int W = Console.WindowWidth;
-        int H = Console.WindowHeight;
-
-        var lines = new[]
-        {
-            "",
-            "  Данная утилита предназначена только для администраторов 1С.",
-            "  Она удаляет кэш, шаблоны и служебные файлы платформы.",
-            "",
-            "  Неправильное использование может привести к потере данных.",
-            ""
-        };
-
-        int w = Math.Min(W - 4, 68);
-        int h = lines.Length + 5;
-        int x = (W - w) / 2;
-        int y = (H - h) / 2;
-
-        void At(int cx, int cy) { try { Console.SetCursorPosition(cx, cy); } catch { } }
-
-        // Рамка
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        At(x, y);
-        var topTitle = "══ Clinkon1C — Предупреждение ";
-        Console.Write("╔" + topTitle + new string('═', w - 2 - topTitle.Length) + "╗");
-        for (int i = 1; i < h - 1; i++) { At(x, y + i); Console.Write("║" + new string(' ', w - 2) + "║"); }
-        At(x, y + h - 1);
-        Console.Write("╚" + new string('═', w - 2) + "╝");
-
-        // Текст
-        int lineY = y + 2;
-        foreach (var line in lines)
-        {
-            At(x + 2, lineY++);
-            var s = line.Length > w - 4 ? line.Substring(0, w - 5) + "…" : line;
-            Console.Write(s);
-        }
-
-        // Кнопки
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        var btns = "[ Y ]  Да, я администратор — продолжить      [ N ]  Выход";
-        At(x + (w - btns.Length) / 2, y + h - 2);
-        Console.Write(btns);
-
-        Console.CursorVisible = false;
-
-        while (true)
-        {
-            var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Y || k.KeyChar == 'y' || k.KeyChar == 'Y') return true;
-            if (k.Key == ConsoleKey.N || k.KeyChar == 'n' || k.KeyChar == 'N'
-                || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10)  return false;
         }
     }
 
@@ -365,49 +220,6 @@ class Program
             if (b < a) return false;
         }
         return false;
-    }
-
-    private static bool ShowUpdateDialog(UpdateInfo upd)
-    {
-        Console.CursorVisible = false;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Clear();
-
-        int W = Console.WindowWidth;
-        int H = Console.WindowHeight;
-        int w = Math.Min(W - 4, 66);
-        int h = 10;
-        int x = (W - w) / 2;
-        int y = (H - h) / 2;
-
-        void At(int cx, int cy) { try { Console.SetCursorPosition(cx, cy); } catch { } }
-
-        At(x, y);
-        var tt = "══ Clinkon1C — Доступно обновление ";
-        Console.Write("╔" + tt + new string('═', w - 2 - tt.Length) + "╗");
-        for (int i = 1; i < h - 1; i++) { At(x, y + i); Console.Write("║" + new string(' ', w - 2) + "║"); }
-        At(x, y + h - 1);
-        Console.Write("╚" + new string('═', w - 2) + "╝");
-
-        At(x + 2, y + 2);
-        Console.Write($"  Текущая версия: {FullVersion}");
-        At(x + 2, y + 3);
-        Console.Write($"  Новая версия:   v{upd.Version}");
-        At(x + 2, y + 5);
-        Console.Write("  Скачать и заменить текущий файл автоматически?");
-
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        var btns = "[ Y ]  Да, обновить сейчас      [ N ]  Позже";
-        At(x + (w - btns.Length) / 2, y + h - 2);
-        Console.Write(btns);
-
-        while (true)
-        {
-            var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Y || k.KeyChar == 'y' || k.KeyChar == 'Y') return true;
-            if (k.Key == ConsoleKey.N || k.KeyChar == 'n' || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
-        }
     }
 
     private static void SelfUpdate(UpdateInfo upd)

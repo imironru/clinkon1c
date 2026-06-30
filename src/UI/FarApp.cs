@@ -244,11 +244,11 @@ public class FarApp
         int total = steps.Length;
         for (int i = 0; i < total; i++)
         {
-            DrawScanProgress(steps[i].Label, i, total);
+            ConsoleDialog.DrawProgressBar("Clinkon1C — Инициализация", steps[i].Label, i, total);
             try { steps[i].Run(); }
             catch (Exception ex) { Logger.Error($"Сканирование [{steps[i].Label}]: {ex.Message}"); }
         }
-        DrawScanProgress("Готово", total, total);
+        ConsoleDialog.DrawProgressBar("Clinkon1C — Инициализация", "Готово", total, total);
         Thread.Sleep(120); // кратко показываем 100%
 
         R.Invalidate();
@@ -294,7 +294,7 @@ public class FarApp
         t.Start();
         while (!done)
         {
-            DrawScanDlg(status, spinCh[spin++ % spinCh.Length]);
+            ConsoleDialog.DrawSpinner("Clinkon1C — Сканирование", status, spinCh[spin++ % spinCh.Length]);
             Thread.Sleep(100);
         }
         t.Join();
@@ -316,43 +316,6 @@ public class FarApp
         }
     }
 
-    private static void DrawScanDlg(string status, char sp)
-    {
-        int dw = Math.Min(58, R.W - 4);
-        int dx = (R.W - dw) / 2;
-        int dy = (R.H - 5) / 2;
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        void At(int x, int y) { try { Console.SetCursorPosition(x, y); } catch { } }
-        At(dx, dy);     Console.Write("╔" + new string('═', dw - 2) + "╗");
-        At(dx, dy + 1); Console.Write("║" + R.Fit(" Clinkon1C — Сканирование", dw - 2) + "║");
-        At(dx, dy + 2); Console.Write("║" + R.Fit($"  {sp}  {status}", dw - 2) + "║");
-        At(dx, dy + 3); Console.Write("║" + new string(' ', dw - 2) + "║");
-        At(dx, dy + 4); Console.Write("╚" + new string('═', dw - 2) + "╝");
-    }
-
-    private static void DrawScanProgress(string label, int step, int total)
-    {
-        int dw   = Math.Min(60, R.W - 4);
-        int dx   = (R.W - dw) / 2;
-        int dy   = (R.H - 7) / 2;
-        int barW = dw - 4;  // ширина полосы внутри рамки
-        int fill = total > 0 ? step * barW / total : barW;
-        string bar  = new string('█', fill) + new string('░', barW - fill);
-        int    pct  = total > 0 ? step * 100 / total : 100;
-        string pctStr = $"{pct,3}%";
-
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.BackgroundColor = ConsoleColor.DarkBlue;
-        void At(int x, int y) { try { Console.SetCursorPosition(x, y); } catch { } }
-        At(dx, dy);     Console.Write("╔" + new string('═', dw - 2) + "╗");
-        At(dx, dy + 1); Console.Write("║" + R.Fit("  Clinkon1C — Инициализация", dw - 2) + "║");
-        At(dx, dy + 2); Console.Write("╠" + new string('═', dw - 2) + "╣");
-        At(dx, dy + 3); Console.Write("║" + R.Fit($"  {label}", dw - 2) + "║");
-        At(dx, dy + 4); Console.Write("║" + " " + bar + " " + "║");
-        At(dx, dy + 5); Console.Write("║" + R.Fit($"  {pctStr}  {step}/{total} модулей", dw - 2) + "║");
-        At(dx, dy + 6); Console.Write("╚" + new string('═', dw - 2) + "╝");
-    }
 
     // ── Построение уровней ───────────────────────────────────────────────────
     // ── Главный экран ────────────────────────────────────────────────────────
@@ -1451,7 +1414,7 @@ public class FarApp
                 break;
 
             case ConsoleKey.Tab:
-                ShowLogView();
+                ConsoleDialog.ShowLog(() => { lock (_logLock) { return _log.ToArray(); } });
                 break;
 
             default:
@@ -1631,7 +1594,7 @@ public class FarApp
         var spinCh = new[] { '|', '/', '-', '\\' };
         while (!delDone)
         {
-            DrawScanDlg($"Удаление {paths.Count} объект(а)...", spinCh[spin++ % spinCh.Length]);
+            ConsoleDialog.DrawSpinner("Clinkon1C — Удаление", $"Удаление {paths.Count} объект(а)...", spinCh[spin++ % spinCh.Length]);
             Thread.Sleep(80);
         }
         delThread.Join();
@@ -3311,78 +3274,7 @@ public class FarApp
         }
     }
 
-    private void ShowLogView()
-    {
-        int w = Console.WindowWidth;
-        int h = Console.WindowHeight;
 
-        (string Lvl, string Txt)[] snap;
-        lock (_logLock) { snap = _log.ToArray(); }
-
-        // Автоскролл к последней строке
-        int visibleLines = h - 2; // 1 строка шапка + 1 строка подсказка
-        int scroll = Math.Max(0, snap.Length - visibleLines);
-
-        while (true)
-        {
-            Console.BackgroundColor = ConsoleColor.Black;
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Clear();
-
-            // Шапка
-            Console.SetCursorPosition(0, 0);
-            Console.BackgroundColor = ConsoleColor.DarkGray;
-            Console.ForegroundColor = ConsoleColor.Black;
-            Console.Write(R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 — обновить  Tab/Esc — закрыть", w));
-
-            // Строки лога
-            Console.BackgroundColor = ConsoleColor.Black;
-            for (int i = 0; i < visibleLines; i++)
-            {
-                int li = scroll + i;
-                Console.SetCursorPosition(0, i + 1);
-                if (li >= snap.Length)
-                {
-                    Console.Write(new string(' ', w));
-                    continue;
-                }
-                var (lvl, txt) = snap[li];
-                Console.ForegroundColor = lvl switch
-                {
-                    "ERR"  => ConsoleColor.Red,
-                    "WARN" => ConsoleColor.Yellow,
-                    "INF"  => ConsoleColor.Cyan,
-                    _      => ConsoleColor.DarkGray,
-                };
-                Console.Write(R.Fit("  " + txt, w));
-            }
-
-            // Подсказка внизу
-            Console.SetCursorPosition(0, h - 1);
-            Console.BackgroundColor = ConsoleColor.DarkGray;
-            Console.ForegroundColor = ConsoleColor.Black;
-            int from = snap.Length == 0 ? 0 : scroll + 1;
-            int to   = Math.Min(snap.Length, scroll + visibleLines);
-            Console.Write(R.Fit($" {from}–{to} из {snap.Length}", w));
-
-            var k = Console.ReadKey(true);
-            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Tab || k.Key == ConsoleKey.Enter)
-                break;
-            if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
-            if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, snap.Length - visibleLines), scroll + 1);
-            if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - visibleLines);
-            if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, snap.Length - visibleLines), scroll + visibleLines);
-            if (k.Key == ConsoleKey.Home)       scroll = 0;
-            if (k.Key == ConsoleKey.End)        scroll = Math.Max(0, snap.Length - visibleLines);
-            if (k.Key == ConsoleKey.F5)
-            {
-                lock (_logLock) { snap = _log.ToArray(); }
-                scroll = Math.Max(0, snap.Length - visibleLines);
-            }
-        }
-
-        R.Invalidate();
-    }
 
     // ── Рисование ─────────────────────────────────────────────────────────────
     private void Draw()

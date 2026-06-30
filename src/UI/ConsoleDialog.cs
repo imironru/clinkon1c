@@ -1,5 +1,7 @@
 namespace Clinkon1C.UI;
 
+internal enum ElevationChoice { Elevate, Continue, Exit }
+
 // Все публичные методы вызывают R.Invalidate() перед выходом —
 // вызывающий код не должен заботиться о восстановлении экрана.
 internal static class ConsoleDialog
@@ -422,6 +424,263 @@ internal static class ConsoleDialog
         }
         R.Invalidate();
         return result;
+    }
+
+    // ── Стартовые диалоги ────────────────────────────────────────────────────
+
+    public static bool ShowWarningDialog()
+    {
+        Console.CursorVisible = false;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        Console.Clear();
+
+        var lines = new[]
+        {
+            "",
+            "  Данная утилита предназначена только для администраторов 1С.",
+            "  Она удаляет кэш, шаблоны и служебные файлы платформы.",
+            "",
+            "  Неправильное использование может привести к потере данных.",
+            ""
+        };
+
+        int w = Math.Min(Console.WindowWidth - 4, 68);
+        int h = lines.Length + 5;
+        int x = (Console.WindowWidth  - w) / 2;
+        int y = (Console.WindowHeight - h) / 2;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, "Clinkon1C — Предупреждение");
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            Pos(x + 2, y + 2 + i);
+            Console.Write(R.Fit(lines[i], w - 4));
+        }
+
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        var btns = "[ Y ]  Да, я администратор — продолжить      [ N ]  Выход";
+        Pos(x + Math.Max(0, (w - btns.Length) / 2), y + h - 2);
+        Console.Write(btns);
+
+        while (true)
+        {
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Y) return true;
+            if (k.Key == ConsoleKey.N || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
+        }
+    }
+
+    public static ElevationChoice ShowElevationMenu()
+    {
+        Console.CursorVisible = false;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        Console.Clear();
+
+        int w = Math.Min(Console.WindowWidth - 4, 66);
+        int h = 11;
+        int x = (Console.WindowWidth  - w) / 2;
+        int y = (Console.WindowHeight - h) / 2;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, "Clinkon1C — Права администратора");
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        Pos(x + 2, y + 2); Console.Write(R.Fit("  Утилита запущена без прав администратора.", w - 4));
+        Pos(x + 2, y + 3); Console.Write(R.Fit("  Часть профилей пользователей будет недоступна.", w - 4));
+
+        var opt1 = "  [ 1 ]  Перезапустить от имени администратора";
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        Pos(x + 2, y + 5); Console.Write(opt1);
+        CC(ConsoleColor.Cyan, ConsoleColor.DarkBlue);
+        Pos(x + 2 + opt1.Length, y + 5); Console.Write("  ← рекомендуется");
+
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        Pos(x + 2, y + 7); Console.Write(R.Fit("  [ 2 ]  Продолжить без повышения прав", w - 4));
+        Pos(x + 2, y + 8); Console.Write(R.Fit("  [ 3 ]  Выход", w - 4));
+
+        while (true)
+        {
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.D1 || k.KeyChar == '1') return ElevationChoice.Elevate;
+            if (k.Key == ConsoleKey.D2 || k.KeyChar == '2') return ElevationChoice.Continue;
+            if (k.Key == ConsoleKey.D3 || k.KeyChar == '3' || k.Key == ConsoleKey.Escape) return ElevationChoice.Exit;
+        }
+    }
+
+    public static bool ShowUpdateDialog(string currentVer, string newVer)
+    {
+        Console.CursorVisible = false;
+        Console.BackgroundColor = ConsoleColor.DarkBlue;
+        Console.Clear();
+
+        int w = Math.Min(Console.WindowWidth - 4, 66);
+        int h = 10;
+        int x = (Console.WindowWidth  - w) / 2;
+        int y = (Console.WindowHeight - h) / 2;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, "Clinkon1C — Доступно обновление");
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        Pos(x + 2, y + 2); Console.Write(R.Fit($"  Текущая версия: {currentVer}", w - 4));
+        Pos(x + 2, y + 3); Console.Write(R.Fit($"  Новая версия:   v{newVer}", w - 4));
+        Pos(x + 2, y + 5); Console.Write(R.Fit("  Скачать и заменить текущий файл автоматически?", w - 4));
+
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        var btns = "[ Y ]  Да, обновить сейчас      [ N ]  Позже";
+        Pos(x + Math.Max(0, (w - btns.Length) / 2), y + h - 2);
+        Console.Write(btns);
+
+        while (true)
+        {
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Y) return true;
+            if (k.Key == ConsoleKey.N || k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) return false;
+        }
+    }
+
+    // ── .NET Framework check (net48-only) ────────────────────────────────────
+
+    public static bool ShowDotNetRequiredDialog()
+    {
+        int w = Math.Min(Console.WindowWidth - 4, 66);
+        int h = 9;
+        int x = (Console.WindowWidth  - w) / 2;
+        int y = (Console.WindowHeight - h) / 2;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Console.Clear();
+        Top(x, y, w, "Clinkon1C — Требуется .NET Framework 4.8");
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        Pos(x + 2, y + 2); Console.Write(R.Fit("  Для работы утилиты необходим Microsoft .NET Framework 4.8.", w - 4));
+        Pos(x + 2, y + 3); Console.Write(R.Fit("  Он не обнаружен на этом компьютере.", w - 4));
+
+        CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
+        Pos(x + 2, y + 5); Console.Write(R.Fit("  [ 1 ]  Открыть страницу загрузки на сайте Microsoft", w - 4));
+        Pos(x + 2, y + 6); Console.Write(R.Fit("  [ 2 ]  Выход", w - 4));
+
+        while (true)
+        {
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.D1 || k.KeyChar == '1') return true;
+            if (k.Key == ConsoleKey.D2 || k.KeyChar == '2' || k.Key == ConsoleKey.Escape) return false;
+        }
+    }
+
+    // ── Лог операций (полноэкранный, Tab) ────────────────────────────────────
+
+    public static void ShowLog(Func<(string Lvl, string Txt)[]> getEntries)
+    {
+        int w = Console.WindowWidth;
+        int h = Console.WindowHeight;
+        int vis = h - 2;
+
+        var snap = getEntries();
+        int scroll = Math.Max(0, snap.Length - vis);
+
+        while (true)
+        {
+            Console.BackgroundColor = ConsoleColor.Black;
+            Console.Clear();
+
+            // Шапка
+            Pos(0, 0);
+            CC(ConsoleColor.Black, ConsoleColor.DarkGray);
+            Console.Write(R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 — обновить  Tab/Esc — закрыть", w));
+
+            // Строки лога
+            for (int i = 0; i < vis; i++)
+            {
+                int li = scroll + i;
+                Pos(0, i + 1);
+                if (li >= snap.Length)
+                {
+                    CC(ConsoleColor.DarkGray, ConsoleColor.Black);
+                    Console.Write(new string(' ', w));
+                    continue;
+                }
+                var (lvl, txt) = snap[li];
+                ConsoleColor fg = lvl switch
+                {
+                    "ERR"  => ConsoleColor.Red,
+                    "WARN" => ConsoleColor.Yellow,
+                    "INF"  => ConsoleColor.Cyan,
+                    _      => ConsoleColor.DarkGray,
+                };
+                CC(fg, ConsoleColor.Black);
+                Console.Write(R.Fit("  " + txt, w));
+            }
+
+            // Подвал
+            Pos(0, h - 1);
+            CC(ConsoleColor.Black, ConsoleColor.DarkGray);
+            int from = snap.Length == 0 ? 0 : scroll + 1;
+            int to   = Math.Min(snap.Length, scroll + vis);
+            Console.Write(R.Fit($" {from}–{to} из {snap.Length}", w));
+
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Tab || k.Key == ConsoleKey.Enter) break;
+            if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
+            if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, snap.Length - vis), scroll + 1);
+            if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - vis);
+            if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, snap.Length - vis), scroll + vis);
+            if (k.Key == ConsoleKey.Home)       scroll = 0;
+            if (k.Key == ConsoleKey.End)        scroll = Math.Max(0, snap.Length - vis);
+            if (k.Key == ConsoleKey.F5)
+            {
+                snap = getEntries();
+                scroll = Math.Max(0, snap.Length - vis);
+            }
+        }
+        R.Invalidate();
+    }
+
+    // ── Спиннер без ввода (вызывается из цикла опроса) ───────────────────────
+
+    public static void DrawSpinner(string title, string status, char spin)
+    {
+        int w = Math.Min(Console.WindowWidth - 4, 58);
+        int h = 4;
+        int x = (Console.WindowWidth  - w) / 2;
+        int y = (Console.WindowHeight - h) / 2;
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, title);
+        Row(x, y + 1, w);
+        Pos(x + 2, y + 2); Console.Write(R.Fit($"  {spin}  {status}", w - 4));
+        Bot(x, y + h - 1, w);
+    }
+
+    // ── Прогресс-бар без ввода (вызывается из цикла) ─────────────────────────
+
+    public static void DrawProgressBar(string title, string label, int step, int total)
+    {
+        int w    = Math.Min(Console.WindowWidth - 4, 60);
+        int h    = 6;
+        int x    = (Console.WindowWidth  - w) / 2;
+        int y    = (Console.WindowHeight - h) / 2;
+        int barW = w - 6;
+        int fill = total > 0 ? step * barW / total : barW;
+        var bar  = new string('█', fill) + new string('░', barW - fill);
+        var pct  = $"{(total > 0 ? step * 100 / total : 100),3}%";
+
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Top(x, y, w, title);
+        for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
+        Bot(x, y + h - 1, w);
+
+        Pos(x + 2, y + 2); Console.Write(R.Fit($"  {label}", w - 4));
+        Pos(x + 2, y + 3); CC(ConsoleColor.Cyan, ConsoleColor.DarkBlue);
+                            Console.Write(R.Fit(" " + bar, w - 4));
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Pos(x + 2, y + 4); Console.Write(R.Fit($"  {pct}  {step}/{total}", w - 4));
     }
 
     // ── Перенос длинных строк ────────────────────────────────────────────────
