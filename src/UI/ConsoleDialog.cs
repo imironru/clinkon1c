@@ -81,21 +81,26 @@ internal static class ConsoleDialog
     // ── Текст со скроллом (Dry Run, Help, Info) ──────────────────────────────
     public static void ShowText(string title, string text, Action? onSave = null)
     {
-        int w   = Math.Min(Console.WindowWidth - 4, 78);
-        var raw = text.Replace("\r", "").Split('\n');
-        var all = WrapLines(raw, w - 4);
+        int w      = Math.Min(Console.WindowWidth - 4, 78);
+        int innerH = Console.WindowHeight - 6;
+        int h      = innerH + 4;
+        int x      = (Console.WindowWidth  - w) / 2;
+        int y      = 1;
+        var raw    = text.Replace("\r", "").Split('\n');
+        var all    = WrapLines(raw, w - 5); // -1 для скроллбара
         int scroll = 0;
+
+        DrawScrollFrame(x, y, w, h, title);
         while (true)
         {
-            DrawScroll(title, all, scroll, onSave != null);
+            DrawScrollBody(all, scroll, innerH, x, y, w, h, onSave != null, null);
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Enter || k.Key == ConsoleKey.F10) break;
             if (k.Key == ConsoleKey.UpArrow)   scroll = Math.Max(0, scroll - 1);
             if (k.Key == ConsoleKey.DownArrow)  scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 1);
-            if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - 10);
-            if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + 10);
-            if (onSave != null && k.Key == ConsoleKey.S)
-                onSave();
+            if (k.Key == ConsoleKey.PageUp)     scroll = Math.Max(0, scroll - innerH);
+            if (k.Key == ConsoleKey.PageDown)   scroll = Math.Min(Math.Max(0, all.Length - 1), scroll + innerH);
+            if (onSave != null && k.Key == ConsoleKey.S) onSave();
         }
         R.Invalidate();
     }
@@ -104,25 +109,35 @@ internal static class ConsoleDialog
     public static void ShowTextWithKeys(Func<(string title, string content)> getInfo,
         string keyHint, Func<ConsoleKey, char, bool>? onKey = null)
     {
-        int w = Math.Min(Console.WindowWidth - 4, 78);
+        int w      = Math.Min(Console.WindowWidth - 4, 78);
+        int innerH = Console.WindowHeight - 6;
+        int h      = innerH + 4;
+        int x      = (Console.WindowWidth  - w) / 2;
+        int y      = 1;
         int scroll = 0;
         string[] all = Array.Empty<string>();
+        string prevTitle = "";
 
         while (true)
         {
             var (title, content) = getInfo();
             var raw = content.Replace("\r", "").Split('\n');
-            all = WrapLines(raw, w - 4);
+            all = WrapLines(raw, w - 5);
             scroll = Math.Min(scroll, Math.Max(0, all.Length - 1));
 
-            DrawScroll(title, all, scroll, false, keyHint);
+            if (title != prevTitle)
+            {
+                DrawScrollFrame(x, y, w, h, title);
+                prevTitle = title;
+            }
+            DrawScrollBody(all, scroll, innerH, x, y, w, h, false, keyHint);
             var k = Console.ReadKey(true);
 
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.F10) break;
             if (k.Key == ConsoleKey.UpArrow)   { scroll = Math.Max(0, scroll - 1); continue; }
             if (k.Key == ConsoleKey.DownArrow)  { scroll = Math.Min(all.Length - 1, scroll + 1); continue; }
-            if (k.Key == ConsoleKey.PageUp)     { scroll = Math.Max(0, scroll - 10); continue; }
-            if (k.Key == ConsoleKey.PageDown)   { scroll = Math.Min(all.Length - 1, scroll + 10); continue; }
+            if (k.Key == ConsoleKey.PageUp)     { scroll = Math.Max(0, scroll - innerH); continue; }
+            if (k.Key == ConsoleKey.PageDown)   { scroll = Math.Min(all.Length - 1, scroll + innerH); continue; }
             if (k.Key == ConsoleKey.Enter)      break;
 
             if (onKey != null && !onKey(k.Key, k.KeyChar)) break;
@@ -549,24 +564,25 @@ internal static class ConsoleDialog
 
     public static void ShowLog(Func<(string Lvl, string Txt)[]> getEntries)
     {
-        int w = Console.WindowWidth;
-        int h = Console.WindowHeight;
-        int vis = h - 2;
+        int w   = Console.WindowWidth;
+        int h   = Console.WindowHeight;
+        int vis = h - 2; // строки контента (строка 0 = шапка, h-1 = подвал)
 
-        var snap = getEntries();
+        var snap   = getEntries();
         int scroll = Math.Max(0, snap.Length - vis);
+
+        // Фон устанавливаем один раз — без Console.Clear() в цикле
+        Console.BackgroundColor = ConsoleColor.Black;
 
         while (true)
         {
-            Console.BackgroundColor = ConsoleColor.Black;
-            Console.Clear();
-
             // Шапка
             Pos(0, 0);
             CC(ConsoleColor.Black, ConsoleColor.DarkGray);
-            Console.Write(R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 — обновить  Tab/Esc — закрыть", w));
+            Console.Write(R.Fit($" Лог операций [{snap.Length}]  ↑↓ PgUp PgDn Home End  F5 Обновить  Tab/Esc Закрыть", w));
 
-            // Строки лога
+            // Контент (w-1 чтобы освободить правый столбец для скроллбара)
+            int contentW = w - 1;
             for (int i = 0; i < vis; i++)
             {
                 int li = scroll + i;
@@ -574,27 +590,37 @@ internal static class ConsoleDialog
                 if (li >= snap.Length)
                 {
                     CC(ConsoleColor.DarkGray, ConsoleColor.Black);
-                    Console.Write(new string(' ', w));
-                    continue;
+                    Console.Write(new string(' ', contentW));
                 }
-                var (lvl, txt) = snap[li];
-                ConsoleColor fg = lvl switch
+                else
                 {
-                    "ERR"  => ConsoleColor.Red,
-                    "WARN" => ConsoleColor.Yellow,
-                    "INF"  => ConsoleColor.Cyan,
-                    _      => ConsoleColor.DarkGray,
-                };
-                CC(fg, ConsoleColor.Black);
-                Console.Write(R.Fit("  " + txt, w));
+                    var (lvl, txt) = snap[li];
+                    ConsoleColor fg = lvl switch
+                    {
+                        "ERR"  => ConsoleColor.Red,
+                        "WARN" => ConsoleColor.Yellow,
+                        "INF"  => ConsoleColor.Cyan,
+                        _      => ConsoleColor.DarkGray,
+                    };
+                    CC(fg, ConsoleColor.Black);
+                    Console.Write(R.Fit("  " + txt, contentW));
+                }
             }
 
-            // Подвал
-            Pos(0, h - 1);
-            CC(ConsoleColor.Black, ConsoleColor.DarkGray);
+            // Скроллбар — правый столбец
+            DrawLogScrollbar(scroll, snap.Length, vis, w - 1);
+
+            // Подвал: диапазон слева, процент справа
             int from = snap.Length == 0 ? 0 : scroll + 1;
             int to   = Math.Min(snap.Length, scroll + vis);
-            Console.Write(R.Fit($" {from}–{to} из {snap.Length}", w));
+            int pct  = snap.Length <= vis ? 100
+                     : (int)(scroll * 100.0 / Math.Max(1, snap.Length - vis));
+            var pctStr  = $" {pct}% ";
+            var leftStr = $" {from}–{to} из {snap.Length}";
+            Pos(0, h - 1);
+            CC(ConsoleColor.Black, ConsoleColor.DarkGray);
+            Console.Write(R.Fit(leftStr, w - pctStr.Length));
+            Console.Write(pctStr);
 
             var k = Console.ReadKey(true);
             if (k.Key == ConsoleKey.Escape || k.Key == ConsoleKey.Tab || k.Key == ConsoleKey.Enter) break;
@@ -606,11 +632,29 @@ internal static class ConsoleDialog
             if (k.Key == ConsoleKey.End)        scroll = Math.Max(0, snap.Length - vis);
             if (k.Key == ConsoleKey.F5)
             {
-                snap = getEntries();
+                snap   = getEntries();
                 scroll = Math.Max(0, snap.Length - vis);
             }
         }
         R.Invalidate();
+    }
+
+    private static void DrawLogScrollbar(int scroll, int total, int vis, int col)
+    {
+        if (total <= vis)
+        {
+            // Всё влезает — пустой столбец
+            CC(ConsoleColor.DarkGray, ConsoleColor.Black);
+            for (int i = 0; i < vis; i++) { Pos(col, i + 1); Console.Write(' '); }
+            return;
+        }
+        int thumbY = (int)(scroll * (double)(vis - 1) / Math.Max(1, total - vis));
+        CC(ConsoleColor.DarkGray, ConsoleColor.Black);
+        for (int i = 0; i < vis; i++)
+        {
+            Pos(col, i + 1);
+            Console.Write(i == thumbY ? '█' : '░');
+        }
     }
 
     // ── Спиннер без ввода (вызывается из цикла опроса) ───────────────────────
@@ -748,33 +792,59 @@ internal static class ConsoleDialog
         }
     }
 
-    private static void DrawScroll(string title, string[] lines, int scroll,
-        bool hasSave = false, string? overrideHint = null)
+    // Рамка рисуется один раз до цикла
+    private static void DrawScrollFrame(int x, int y, int w, int h, string title)
     {
-        int w      = Math.Min(Console.WindowWidth - 4, 78);
-        int innerH = Console.WindowHeight - 6;
-        int h      = innerH + 4;
-        int x      = (Console.WindowWidth  - w) / 2;
-        int y      = 1;
-
         CC(ConsoleColor.White, ConsoleColor.DarkBlue);
         Top(x, y, w, title);
         for (int i = 1; i < h - 1; i++) Row(x, y + i, w);
         Bot(x, y + h - 1, w);
+    }
+
+    // Только контент + скроллбар + подсказка — без перерисовки рамки
+    private static void DrawScrollBody(string[] lines, int scroll, int innerH,
+        int x, int y, int w, int h, bool hasSave, string? overrideHint)
+    {
+        int contentW = w - 5; // -2 границы, -2 отступы, -1 скроллбар
 
         for (int i = 0; i < innerH; i++)
         {
             int li = scroll + i;
             CC(ConsoleColor.White, ConsoleColor.DarkBlue);
             Pos(x + 2, y + 2 + i);
-            Console.Write(R.Fit(li < lines.Length ? lines[li] : "", w - 4));
+            Console.Write(R.Fit(li < lines.Length ? lines[li] : "", contentW));
         }
+
+        // Скроллбар (столбец x + w - 2, внутри правой границы)
+        int sbCol = x + w - 2;
+        if (lines.Length > innerH)
+        {
+            int thumbY = (int)(scroll * (double)(innerH - 1) / Math.Max(1, lines.Length - innerH));
+            for (int i = 0; i < innerH; i++)
+            {
+                Pos(sbCol, y + 2 + i);
+                CC(ConsoleColor.DarkGray, ConsoleColor.DarkBlue);
+                Console.Write(i == thumbY ? '█' : '░');
+            }
+        }
+        else
+        {
+            CC(ConsoleColor.DarkBlue, ConsoleColor.DarkBlue);
+            for (int i = 0; i < innerH; i++) { Pos(sbCol, y + 2 + i); Console.Write(' '); }
+        }
+
+        // Подсказка + процент
+        int pct = lines.Length <= innerH ? 100
+                : (int)(scroll * 100.0 / Math.Max(1, lines.Length - innerH));
+        var pctStr = $" {pct}%";
+        var hint   = overrideHint ?? (hasSave
+            ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
+            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть");
 
         CC(ConsoleColor.Yellow, ConsoleColor.DarkBlue);
         Pos(x + 2, y + h - 2);
-        var hint = overrideHint ?? (hasSave
-            ? "↑↓ PgUp PgDn   [S] Сохранить   Enter/Esc — закрыть"
-            : "↑↓ PgUp PgDn — прокрутка   Enter/Esc — закрыть");
-        Console.Write(R.Fit(hint, w - 4));
+        Console.Write(R.Fit(hint, w - 4 - pctStr.Length));
+        CC(ConsoleColor.White, ConsoleColor.DarkBlue);
+        Console.Write(pctStr);
     }
 }
